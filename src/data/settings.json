@@ -1,0 +1,26 @@
+[
+  {
+    "id": "app-config-001",
+    "key": "app.config",
+    "value": {
+      "backendEnabled": false,
+      "apiBaseUrl": "http://localhost:8000",
+      "timeoutMs": 6000,
+      "healthIntervalMs": 15000,
+      "modalities": ["US", "CT", "MR", "DR", "OT", "SC", "SR", "RF", "NM", "CR", "XA", "MG"],
+      "patientDataValidation": true,
+      "patientDataEncryption": false,
+      "autoSaveInterval": 5,
+      "dataRetentionDays": 365,
+      "rbacEnabled": true,
+      "permissionCaching": true,
+      "permissionCacheTTL": 60,
+      "sessionTimeout": 30,
+      "autoSync": true,
+      "conflictResolution": true,
+      "syncInterval": 10,
+      "offlineBufferSize": 100
+    },
+    "description": "Application configuration settings with fallback to local storage"
+  }
+]

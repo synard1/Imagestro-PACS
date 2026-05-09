@@ -1,0 +1,12 @@
+[
+  {"id":"NS001","name":"Suster Nana","license":"SIP-001","department":"Radiology","phone":"081234568001"},
+  {"id":"NS002","name":"Suster Olin","license":"SIP-002","department":"ER","phone":"081234568002"},
+  {"id":"NS003","name":"Suster Putri","license":"SIP-003","department":"Ward A","phone":"081234568003"},
+  {"id":"NS004","name":"Suster Qory","license":"SIP-004","department":"Ward B","phone":"081234568004"},
+  {"id":"NS005","name":"Suster Rini","license":"SIP-005","department":"OPD","phone":"081234568005"},
+  {"id":"NS006","name":"Suster Sari","license":"SIP-006","department":"ICU","phone":"081234568006"},
+  {"id":"NS007","name":"Suster Tari","license":"SIP-007","department":"NICU","phone":"081234568007"},
+  {"id":"NS008","name":"Suster Ulfa","license":"SIP-008","department":"Radiology","phone":"081234568008"},
+  {"id":"NS009","name":"Suster Vina","license":"SIP-009","department":"OT","phone":"081234568009"},
+  {"id":"NS010","name":"Suster Wati","license":"SIP-010","department":"Ward C","phone":"081234568010"}
+]

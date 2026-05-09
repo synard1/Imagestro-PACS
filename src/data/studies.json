@@ -1,0 +1,304 @@
+[
+  {
+    "studyId": "STU-CT-01",
+    "studyInstanceUID": "1.2.826.0.1.3680043.2.1125.20251115.CT.1",
+    "studyDate": "2025-11-15",
+    "studyTime": "08:30:00",
+    "accessionNumber": "ACC-2025-00101",
+    "description": "CT Head Non-Contrast",
+    "modality": "CT",
+    "status": "completed",
+    "patient": { "name": "Andi Saputra", "mrn": "MRN0001", "birthDate": "1988-04-12" },
+    "series": [
+      {
+        "seriesId": "SER-CT-01",
+        "seriesInstanceUID": "1.2.826.0.1.3680043.2.1125.20251115.CT.1.1",
+        "modality": "CT",
+        "seriesNumber": 1,
+        "description": "Axial 5mm",
+        "instances": [
+          { "sopInstanceUID": "1.2.826...CT.1.1.1", "instanceNumber": 1 },
+          { "sopInstanceUID": "1.2.826...CT.1.1.2", "instanceNumber": 2 },
+          { "sopInstanceUID": "1.2.826...CT.1.1.3", "instanceNumber": 3 }
+        ]
+      },
+      {
+        "seriesId": "SER-CT-02",
+        "seriesInstanceUID": "1.2.826.0.1.3680043.2.1125.20251115.CT.1.2",
+        "modality": "CT",
+        "seriesNumber": 2,
+        "description": "Coronal reformats",
+        "instances": [
+          { "sopInstanceUID": "1.2.826...CT.1.2.1", "instanceNumber": 1 }
+        ]
+      }
+    ]
+  },
+  {
+    "studyId": "STU-MR-02",
+    "studyInstanceUID": "1.2.826.0.1.3680043.2.1125.20251115.MR.1",
+    "studyDate": "2025-11-15",
+    "studyTime": "09:45:00",
+    "accessionNumber": "ACC-2025-00102",
+    "description": "MRI Knee Left",
+    "modality": "MR",
+    "status": "completed",
+    "patient": { "name": "Budi Santoso", "mrn": "MRN0002", "birthDate": "1990-02-21" },
+    "series": [
+      {
+        "seriesId": "SER-MR-01",
+        "seriesInstanceUID": "1.2.826.0.1.3680043.2.1125.20251115.MR.1.1",
+        "modality": "MR",
+        "seriesNumber": 1,
+        "description": "PD fat-sat Sagittal",
+        "instances": [
+          { "sopInstanceUID": "1.2.826...MR.1.1.1", "instanceNumber": 1 },
+          { "sopInstanceUID": "1.2.826...MR.1.1.2", "instanceNumber": 2 },
+          { "sopInstanceUID": "1.2.826...MR.1.1.3", "instanceNumber": 3 }
+        ]
+      },
+      {
+        "seriesId": "SER-MR-02",
+        "seriesInstanceUID": "1.2.826.0.1.3680043.2.1125.20251115.MR.1.2",
+        "modality": "MR",
+        "seriesNumber": 2,
+        "description": "T2 TSE Coronal",
+        "instances": [
+          { "sopInstanceUID": "1.2.826...MR.1.2.1", "instanceNumber": 1 },
+          { "sopInstanceUID": "1.2.826...MR.1.2.2", "instanceNumber": 2 }
+        ]
+      }
+    ]
+  },
+  {
+    "studyId": "STU-CR-03",
+    "studyInstanceUID": "1.2.826.0.1.3680043.2.1125.20251115.CR.1",
+    "studyDate": "2025-11-15",
+    "studyTime": "10:15:00",
+    "accessionNumber": "ACC-2025-00103",
+    "description": "Chest X-Ray PA",
+    "modality": "CR",
+    "status": "completed",
+    "patient": { "name": "Citra Dewi", "mrn": "MRN0003", "birthDate": "1995-07-18" },
+    "series": [
+      {
+        "seriesId": "SER-CR-01",
+        "seriesInstanceUID": "1.2.826.0.1.3680043.2.1125.20251115.CR.1.1",
+        "modality": "CR",
+        "seriesNumber": 1,
+        "description": "PA View",
+        "instances": [
+          { "sopInstanceUID": "1.2.826...CR.1.1.1", "instanceNumber": 1 }
+        ]
+      }
+    ]
+  },
+  {
+    "studyId": "STU-CT-04",
+    "studyInstanceUID": "1.2.826.0.1.3680043.2.1125.20251115.CT.2",
+    "studyDate": "2025-11-15",
+    "studyTime": "11:00:00",
+    "accessionNumber": "ACC-2025-00104",
+    "description": "CT Abdomen with Contrast",
+    "modality": "CT",
+    "status": "in_progress",
+    "patient": { "name": "Dedi Kurniawan", "mrn": "MRN0004", "birthDate": "1982-11-30" },
+    "series": [
+      {
+        "seriesId": "SER-CT-03",
+        "seriesInstanceUID": "1.2.826.0.1.3680043.2.1125.20251115.CT.2.1",
+        "modality": "CT",
+        "seriesNumber": 1,
+        "description": "Pre-contrast",
+        "instances": [
+          { "sopInstanceUID": "1.2.826...CT.2.1.1", "instanceNumber": 1 }
+        ]
+      }
+    ]
+  },
+  {
+    "studyId": "STU-US-05",
+    "studyInstanceUID": "1.2.826.0.1.3680043.2.1125.20251115.US.1",
+    "studyDate": "2025-11-15",
+    "studyTime": "13:30:00",
+    "accessionNumber": "ACC-2025-00105",
+    "description": "Ultrasound Abdomen",
+    "modality": "US",
+    "status": "scheduled",
+    "patient": { "name": "Eka Putri", "mrn": "MRN0005", "birthDate": "1998-03-25" },
+    "series": []
+  },
+  {
+    "studyId": "STU-MR-06",
+    "studyInstanceUID": "1.2.826.0.1.3680043.2.1125.20251114.MR.1",
+    "studyDate": "2025-11-14",
+    "studyTime": "14:20:00",
+    "accessionNumber": "ACC-2025-00106",
+    "description": "MRI Brain with Contrast",
+    "modality": "MR",
+    "status": "completed",
+    "patient": { "name": "Fajar Ramadhan", "mrn": "MRN0006", "birthDate": "1985-09-12" },
+    "series": [
+      {
+        "seriesId": "SER-MR-03",
+        "seriesInstanceUID": "1.2.826.0.1.3680043.2.1125.20251114.MR.1.1",
+        "modality": "MR",
+        "seriesNumber": 1,
+        "description": "T1 Axial",
+        "instances": [
+          { "sopInstanceUID": "1.2.826...MR.1.1.1", "instanceNumber": 1 },
+          { "sopInstanceUID": "1.2.826...MR.1.1.2", "instanceNumber": 2 }
+        ]
+      },
+      {
+        "seriesId": "SER-MR-04",
+        "seriesInstanceUID": "1.2.826.0.1.3680043.2.1125.20251114.MR.1.2",
+        "modality": "MR",
+        "seriesNumber": 2,
+        "description": "T2 FLAIR",
+        "instances": [
+          { "sopInstanceUID": "1.2.826...MR.1.2.1", "instanceNumber": 1 },
+          { "sopInstanceUID": "1.2.826...MR.1.2.2", "instanceNumber": 2 }
+        ]
+      },
+      {
+        "seriesId": "SER-MR-05",
+        "seriesInstanceUID": "1.2.826.0.1.3680043.2.1125.20251114.MR.1.3",
+        "modality": "MR",
+        "seriesNumber": 3,
+        "description": "T1 Post-Contrast",
+        "instances": [
+          { "sopInstanceUID": "1.2.826...MR.1.3.1", "instanceNumber": 1 }
+        ]
+      }
+    ]
+  },
+  {
+    "studyId": "STU-CT-07",
+    "studyInstanceUID": "1.2.826.0.1.3680043.2.1125.20251114.CT.1",
+    "studyDate": "2025-11-14",
+    "studyTime": "15:45:00",
+    "accessionNumber": "ACC-2025-00107",
+    "description": "CT Chest High Resolution",
+    "modality": "CT",
+    "status": "completed",
+    "patient": { "name": "Gita Maharani", "mrn": "MRN0007", "birthDate": "1992-06-08" },
+    "series": [
+      {
+        "seriesId": "SER-CT-04",
+        "seriesInstanceUID": "1.2.826.0.1.3680043.2.1125.20251114.CT.1.1",
+        "modality": "CT",
+        "seriesNumber": 1,
+        "description": "HRCT Axial",
+        "instances": [
+          { "sopInstanceUID": "1.2.826...CT.1.1.1", "instanceNumber": 1 },
+          { "sopInstanceUID": "1.2.826...CT.1.1.2", "instanceNumber": 2 },
+          { "sopInstanceUID": "1.2.826...CT.1.1.3", "instanceNumber": 3 },
+          { "sopInstanceUID": "1.2.826...CT.1.1.4", "instanceNumber": 4 }
+        ]
+      }
+    ]
+  },
+  {
+    "studyId": "STU-DR-08",
+    "studyInstanceUID": "1.2.826.0.1.3680043.2.1125.20251113.DR.1",
+    "studyDate": "2025-11-13",
+    "studyTime": "09:00:00",
+    "accessionNumber": "ACC-2025-00108",
+    "description": "X-Ray Lumbar Spine AP/Lateral",
+    "modality": "DR",
+    "status": "completed",
+    "patient": { "name": "Hendra Wijaya", "mrn": "MRN0008", "birthDate": "1978-12-15" },
+    "series": [
+      {
+        "seriesId": "SER-DR-01",
+        "seriesInstanceUID": "1.2.826.0.1.3680043.2.1125.20251113.DR.1.1",
+        "modality": "DR",
+        "seriesNumber": 1,
+        "description": "AP View",
+        "instances": [
+          { "sopInstanceUID": "1.2.826...DR.1.1.1", "instanceNumber": 1 }
+        ]
+      },
+      {
+        "seriesId": "SER-DR-02",
+        "seriesInstanceUID": "1.2.826.0.1.3680043.2.1125.20251113.DR.1.2",
+        "modality": "DR",
+        "seriesNumber": 2,
+        "description": "Lateral View",
+        "instances": [
+          { "sopInstanceUID": "1.2.826...DR.1.2.1", "instanceNumber": 1 }
+        ]
+      }
+    ]
+  },
+  {
+    "studyId": "STU-MR-09",
+    "studyInstanceUID": "1.2.826.0.1.3680043.2.1125.20251113.MR.1",
+    "studyDate": "2025-11-13",
+    "studyTime": "10:30:00",
+    "accessionNumber": "ACC-2025-00109",
+    "description": "MRI Cervical Spine",
+    "modality": "MR",
+    "status": "completed",
+    "patient": { "name": "Indah Permata", "mrn": "MRN0009", "birthDate": "1987-04-22" },
+    "series": [
+      {
+        "seriesId": "SER-MR-06",
+        "seriesInstanceUID": "1.2.826.0.1.3680043.2.1125.20251113.MR.1.1",
+        "modality": "MR",
+        "seriesNumber": 1,
+        "description": "T2 Sagittal",
+        "instances": [
+          { "sopInstanceUID": "1.2.826...MR.1.1.1", "instanceNumber": 1 },
+          { "sopInstanceUID": "1.2.826...MR.1.1.2", "instanceNumber": 2 }
+        ]
+      },
+      {
+        "seriesId": "SER-MR-07",
+        "seriesInstanceUID": "1.2.826.0.1.3680043.2.1125.20251113.MR.1.2",
+        "modality": "MR",
+        "seriesNumber": 2,
+        "description": "T1 Axial",
+        "instances": [
+          { "sopInstanceUID": "1.2.826...MR.1.2.1", "instanceNumber": 1 }
+        ]
+      }
+    ]
+  },
+  {
+    "studyId": "STU-CT-10",
+    "studyInstanceUID": "1.2.826.0.1.3680043.2.1125.20251112.CT.1",
+    "studyDate": "2025-11-12",
+    "studyTime": "11:15:00",
+    "accessionNumber": "ACC-2025-00110",
+    "description": "CT Angiography Brain",
+    "modality": "CT",
+    "status": "completed",
+    "patient": { "name": "Joko Susilo", "mrn": "MRN0010", "birthDate": "1980-08-05" },
+    "series": [
+      {
+        "seriesId": "SER-CT-05",
+        "seriesInstanceUID": "1.2.826.0.1.3680043.2.1125.20251112.CT.1.1",
+        "modality": "CT",
+        "seriesNumber": 1,
+        "description": "CTA Axial",
+        "instances": [
+          { "sopInstanceUID": "1.2.826...CT.1.1.1", "instanceNumber": 1 },
+          { "sopInstanceUID": "1.2.826...CT.1.1.2", "instanceNumber": 2 },
+          { "sopInstanceUID": "1.2.826...CT.1.1.3", "instanceNumber": 3 }
+        ]
+      },
+      {
+        "seriesId": "SER-CT-06",
+        "seriesInstanceUID": "1.2.826.0.1.3680043.2.1125.20251112.CT.1.2",
+        "modality": "CT",
+        "seriesNumber": 2,
+        "description": "MIP Reconstruction",
+        "instances": [
+          { "sopInstanceUID": "1.2.826...CT.1.2.1", "instanceNumber": 1 }
+        ]
+      }
+    ]
+  }
+]

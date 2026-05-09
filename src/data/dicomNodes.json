@@ -1,0 +1,26 @@
+[
+  {
+    "id": "n-1",
+    "name": "ORTHANC_WL",
+    "type": "Worklist",
+    "ae_title": "ORTHANC_WL",
+    "host": "orthanc",
+    "port": 4242
+  },
+  {
+    "id": "n-2",
+    "name": "PACS_LOCAL",
+    "type": "PACS",
+    "ae_title": "PACS_LOCAL",
+    "host": "pacs",
+    "port": 11112
+  },
+  {
+    "id": "n-3",
+    "name": "SATUSEHAT_ROUTER",
+    "type": "Router",
+    "ae_title": "SATUSEHAT",
+    "host": "router",
+    "port": 104
+  }
+]

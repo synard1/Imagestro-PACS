@@ -1,0 +1,178 @@
+[
+  {
+    "id": 1,
+    "name": "CT Brain Report",
+    "modality": "CT",
+    "bodyPart": "Brain",
+    "category": "Neuroradiology",
+    "sections": [
+      {
+        "id": "clinical_info",
+        "title": "Clinical Information",
+        "placeholder": "Enter clinical history and indication for examination..."
+      },
+      {
+        "id": "technique",
+        "title": "Technique",
+        "defaultContent": "Non-contrast CT scan of the brain was performed using helical technique with axial, coronal, and sagittal reconstructions."
+      },
+      {
+        "id": "findings",
+        "title": "Findings",
+        "placeholder": "Describe imaging findings in detail..."
+      },
+      {
+        "id": "impression",
+        "title": "Impression",
+        "placeholder": "Summarize key findings and conclusions..."
+      }
+    ]
+  },
+  {
+    "id": 2,
+    "name": "Chest X-Ray Report",
+    "modality": "XR",
+    "bodyPart": "Chest",
+    "category": "Thoracic",
+    "sections": [
+      {
+        "id": "clinical_info",
+        "title": "Clinical Information",
+        "placeholder": "Enter clinical history..."
+      },
+      {
+        "id": "technique",
+        "title": "Technique",
+        "defaultContent": "PA and lateral chest radiographs were obtained."
+      },
+      {
+        "id": "comparison",
+        "title": "Comparison",
+        "placeholder": "Comparison with previous studies if available..."
+      },
+      {
+        "id": "findings",
+        "title": "Findings",
+        "subsections": [
+          "Lungs",
+          "Heart and Mediastinum",
+          "Pleura",
+          "Bones and Soft Tissues"
+        ],
+        "placeholder": "Describe findings for each subsection..."
+      },
+      {
+        "id": "impression",
+        "title": "Impression",
+        "placeholder": "Summarize key findings..."
+      }
+    ]
+  },
+  {
+    "id": 3,
+    "name": "MRI Spine Report",
+    "modality": "MRI",
+    "bodyPart": "Spine",
+    "category": "Musculoskeletal",
+    "sections": [
+      {
+        "id": "clinical_info",
+        "title": "Clinical Information",
+        "placeholder": "Enter clinical history and symptoms..."
+      },
+      {
+        "id": "technique",
+        "title": "Technique",
+        "defaultContent": "MRI of the lumbar spine was performed without contrast using T1, T2, and STIR sequences in sagittal and axial planes."
+      },
+      {
+        "id": "findings",
+        "title": "Findings",
+        "subsections": [
+          "Vertebral Bodies",
+          "Intervertebral Discs",
+          "Spinal Canal",
+          "Neural Foramina",
+          "Paraspinal Soft Tissues"
+        ],
+        "placeholder": "Describe findings for each level..."
+      },
+      {
+        "id": "impression",
+        "title": "Impression",
+        "placeholder": "Summarize key findings and clinical significance..."
+      }
+    ]
+  },
+  {
+    "id": 4,
+    "name": "Ultrasound Abdomen Report",
+    "modality": "US",
+    "bodyPart": "Abdomen",
+    "category": "Abdominal",
+    "sections": [
+      {
+        "id": "clinical_info",
+        "title": "Clinical Information",
+        "placeholder": "Enter clinical indication..."
+      },
+      {
+        "id": "technique",
+        "title": "Technique",
+        "defaultContent": "Real-time ultrasound examination of the abdomen was performed."
+      },
+      {
+        "id": "findings",
+        "title": "Findings",
+        "subsections": [
+          "Liver",
+          "Gallbladder",
+          "Pancreas",
+          "Spleen",
+          "Kidneys",
+          "Urinary Bladder"
+        ],
+        "placeholder": "Describe findings for each organ..."
+      },
+      {
+        "id": "impression",
+        "title": "Impression",
+        "placeholder": "Summarize key findings..."
+      }
+    ]
+  },
+  {
+    "id": 5,
+    "name": "General Report Template",
+    "modality": "ALL",
+    "bodyPart": "General",
+    "category": "General",
+    "sections": [
+      {
+        "id": "clinical_info",
+        "title": "Clinical Information",
+        "placeholder": "Enter clinical history..."
+      },
+      {
+        "id": "technique",
+        "title": "Technique",
+        "placeholder": "Describe imaging technique..."
+      },
+      {
+        "id": "comparison",
+        "title": "Comparison",
+        "placeholder": "Comparison with previous studies..."
+      },
+      {
+        "id": "findings",
+        "title": "Findings",
+        "placeholder": "Describe imaging findings..."
+      },
+      {
+        "id": "impression",
+        "title": "Impression",
+        "placeholder": "Summarize key findings and conclusions..."
+      }
+    ]
+  }
+]

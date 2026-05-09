@@ -1,0 +1,110 @@
+[
+  {
+    "_meta": {
+      "protected": true,
+      "purpose": "SATUSEHAT testing data - READ ONLY",
+      "warning": "Do not modify this data. It is used for official SATUSEHAT integration testing.",
+      "source": "https://satusehat.kemkes.go.id/platform/docs/id/api-catalogue/onboardings/apis/patient/"
+    }
+  },
+  {
+    "id": "pat- oficial-001",
+    "patient_national_id": "9271060312000001",
+    "ihs_number": "P02478375538",
+    "medical_record_number": "MRN-official-001",
+    "name": "Ardianto Putra",
+    "birth_date": "1992-12-03",
+    "gender": "M",
+    "phone": "+62-812-0001-0001"
+  },
+  {
+    "id": "pat-official-002",
+    "patient_national_id": "9204014804000002",
+    "ihs_number": "P03647103112",
+    "medical_record_number": "MRN-official-002",
+    "name": "Claudia Sintia",
+    "birth_date": "1992-04-01",
+    "gender": "F",
+    "phone": "+62-812-0002-0002"
+  },
+  {
+    "id": "pat-official-003",
+    "patient_national_id": "9104224509000003",
+    "ihs_number": "P00805884304",
+    "medical_record_number": "MRN-official-003",
+    "name": "Elizabeth Dior",
+    "birth_date": "1991-04-22",
+    "gender": "F",
+    "phone": "+62-812-0003-0003"
+  },
+  {
+    "id": "pat-official-004",
+    "patient_national_id": "9104223107000004",
+    "ihs_number": "P00912894463",
+    "medical_record_number": "MRN-official-004",
+    "name": "Dr. Alan Bagus Prasetya",
+    "birth_date": "1991-04-22",
+    "gender": "M",
+    "phone": "+62-812-0004-0004"
+  },
+  {
+    "id": "pat-official-005",
+    "patient_national_id": "9104224606000005",
+    "ihs_number": "P01654557057",
+    "medical_record_number": "MRN-official-005",
+    "name": "Ghina Assyifa",
+    "birth_date": "1991-04-22",
+    "gender": "F",
+    "phone": "+62-812-0005-0005"
+  },
+  {
+    "id": "pat-official-006",
+    "patient_national_id": "9104025209000006",
+    "ihs_number": "P02280547535",
+    "medical_record_number": "MRN-official-006",
+    "name": "Salsabilla Anjani Rizki",
+    "birth_date": "1991-04-02",
+    "gender": "F",
+    "phone": "+62-812-0006-0006"
+  },
+  {
+    "id": "pat-official-007",
+    "patient_national_id": "9201076001000007",
+    "ihs_number": "P01836748436",
+    "medical_record_number": "MRN-official-007",
+    "name": "Theodore Elisjah",
+    "birth_date": "1992-01-07",
+    "gender": "M",
+    "phone": "+62-812-0007-0007"
+  },
+  {
+    "id": "pat-official-008",
+    "patient_national_id": "9201394901000008",
+    "ihs_number": "P00883356749",
+    "medical_record_number": "MRN-official-008",
+    "name": "Sonia Herdianti",
+    "birth_date": "1992-01-13",
+    "gender": "F",
+    "phone": "+62-812-0008-0008"
+  },
+  {
+    "id": "pat-official-009",
+    "patient_national_id": "9201076407000009",
+    "ihs_number": "P01058967035",
+    "medical_record_number": "MRN-official-009",
+    "name": "Nancy Wang",
+    "birth_date": "1992-01-07",
+    "gender": "F",
+    "phone": "+62-812-0009-0009"
+  },
+  {
+    "id": "pat-official-010",
+    "patient_national_id": "9210060207000010",
+    "ihs_number": "P02428473601",
+    "medical_record_number": "MRN-official-010",
+    "name": "Syarif Muhammad",
+    "birth_date": "1992-10-06",
+    "gender": "M",
+    "phone": "+62-812-0010-0010"
+  }
+]

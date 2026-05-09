@@ -1,0 +1,324 @@
+[
+  {
+    "id": 1,
+    "patientName": "John Doe",
+    "patientId": "P001",
+    "patientDOB": "1975-03-15",
+    "patientGender": "M",
+    "accessionNumber": "ACC20251115001",
+    "studyInstanceUID": "1.2.840.113619.2.55.3.2831164605.123.1234567890.1",
+    "studyDate": "2025-11-15",
+    "studyTime": "09:30:00",
+    "studyDescription": "CT Brain without Contrast",
+    "modality": "CT",
+    "status": "completed",
+    "priority": "routine",
+    "referringPhysician": "Dr. Sarah Johnson",
+    "institution": "General Hospital",
+    "numberOfSeries": 3,
+    "numberOfInstances": 3,
+    "series": [
+      {
+        "seriesNumber": 1,
+        "seriesInstanceUID": "1.2.840.113619.2.55.3.2831164605.123.1234567890.1.1",
+        "seriesDescription": "Standard Definition",
+        "instanceCount": 1,
+        "modality": "CT",
+        "instances": [
+          {
+            "sopInstanceUID": "1.2.840.113619.2.55.3.2831164605.123.1234567890.1.1.1",
+            "instanceNumber": 1,
+            "imageId": "wadouri:/uploads/SD-720x480.dcm"
+          }
+        ]
+      },
+      {
+        "seriesNumber": 2,
+        "seriesInstanceUID": "1.2.840.113619.2.55.3.2831164605.123.1234567890.1.2",
+        "seriesDescription": "Modified SD",
+        "instanceCount": 1,
+        "modality": "CT",
+        "instances": [
+          {
+            "sopInstanceUID": "1.2.840.113619.2.55.3.2831164605.123.1234567890.1.2.1",
+            "instanceNumber": 1,
+            "imageId": "wadouri:/uploads/modified_SD-720x480.dcm"
+          }
+        ]
+      },
+      {
+        "seriesNumber": 3,
+        "seriesInstanceUID": "1.2.840.113619.2.55.3.2831164605.123.1234567890.1.3",
+        "seriesDescription": "Square Format",
+        "instanceCount": 1,
+        "modality": "CT",
+        "instances": [
+          {
+            "sopInstanceUID": "1.2.840.113619.2.55.3.2831164605.123.1234567890.1.3.1",
+            "instanceNumber": 1,
+            "imageId": "wadouri:/uploads/Square-1080x1080.dcm"
+          }
+        ]
+      }
+    ],
+    "thumbnailUrl": "/api/studies/1/thumbnail"
+  },
+  {
+    "id": 2,
+    "patientName": "Jane Smith",
+    "patientId": "P002",
+    "patientDOB": "1985-07-22",
+    "patientGender": "F",
+    "accessionNumber": "ACC20251115002",
+    "studyInstanceUID": "1.2.840.113619.2.55.3.2831164605.123.1234567890.2",
+    "studyDate": "2025-11-15",
+    "studyTime": "10:45:00",
+    "studyDescription": "High Resolution Imaging Study",
+    "modality": "CT",
+    "status": "in-progress",
+    "priority": "urgent",
+    "referringPhysician": "Dr. Michael Chen",
+    "institution": "General Hospital",
+    "numberOfSeries": 2,
+    "numberOfInstances": 2,
+    "series": [
+      {
+        "seriesNumber": 1,
+        "seriesInstanceUID": "1.2.840.113619.2.55.3.2831164605.123.1234567890.2.1",
+        "seriesDescription": "HD Portrait",
+        "instanceCount": 1,
+        "modality": "CT",
+        "instances": [
+          {
+            "sopInstanceUID": "1.2.840.113619.2.55.3.2831164605.123.1234567890.2.1.1",
+            "instanceNumber": 1,
+            "imageId": "wadouri:/uploads/HD-1080x1920.dcm"
+          }
+        ]
+      },
+      {
+        "seriesNumber": 2,
+        "seriesInstanceUID": "1.2.840.113619.2.55.3.2831164605.123.1234567890.2.2",
+        "seriesDescription": "4K Ultra HD",
+        "instanceCount": 1,
+        "modality": "CT",
+        "instances": [
+          {
+            "sopInstanceUID": "1.2.840.113619.2.55.3.2831164605.123.1234567890.2.2.1",
+            "instanceNumber": 1,
+            "imageId": "wadouri:/uploads/4K-2160x3840.dcm"
+          }
+        ]
+      }
+    ],
+    "thumbnailUrl": "/api/studies/2/thumbnail"
+  },
+  {
+    "id": 3,
+    "patientName": "Robert Johnson",
+    "patientId": "P003",
+    "patientDOB": "1960-11-30",
+    "patientGender": "M",
+    "accessionNumber": "ACC20251115003",
+    "studyInstanceUID": "1.2.840.113619.2.55.3.2831164605.123.1234567890.3",
+    "studyDate": "2025-11-15",
+    "studyTime": "11:15:00",
+    "studyDescription": "Chest X-Ray PA and Lateral",
+    "modality": "XR",
+    "status": "completed",
+    "priority": "routine",
+    "referringPhysician": "Dr. Emily Brown",
+    "institution": "General Hospital",
+    "numberOfSeries": 2,
+    "numberOfInstances": 2,
+    "series": [
+      {
+        "seriesNumber": 1,
+        "seriesDescription": "PA View",
+        "instanceCount": 1,
+        "modality": "XR"
+      },
+      {
+        "seriesNumber": 2,
+        "seriesDescription": "Lateral View",
+        "instanceCount": 1,
+        "modality": "XR"
+      }
+    ],
+    "thumbnailUrl": "/api/studies/3/thumbnail"
+  },
+  {
+    "id": 4,
+    "patientName": "Maria Garcia",
+    "patientId": "P004",
+    "patientDOB": "1992-04-18",
+    "patientGender": "F",
+    "accessionNumber": "ACC20251115004",
+    "studyInstanceUID": "1.2.840.113619.2.55.3.2831164605.123.1234567890.4",
+    "studyDate": "2025-11-15",
+    "studyTime": "13:00:00",
+    "studyDescription": "Abdominal Ultrasound",
+    "modality": "US",
+    "status": "pending",
+    "priority": "routine",
+    "referringPhysician": "Dr. David Lee",
+    "institution": "General Hospital",
+    "numberOfSeries": 4,
+    "numberOfInstances": 80,
+    "series": [
+      {
+        "seriesNumber": 1,
+        "seriesDescription": "Liver",
+        "instanceCount": 20,
+        "modality": "US"
+      },
+      {
+        "seriesNumber": 2,
+        "seriesDescription": "Gallbladder",
+        "instanceCount": 20,
+        "modality": "US"
+      },
+      {
+        "seriesNumber": 3,
+        "seriesDescription": "Kidneys",
+        "instanceCount": 20,
+        "modality": "US"
+      },
+      {
+        "seriesNumber": 4,
+        "seriesDescription": "Spleen",
+        "instanceCount": 20,
+        "modality": "US"
+      }
+    ],
+    "thumbnailUrl": "/api/studies/4/thumbnail"
+  },
+  {
+    "id": 5,
+    "patientName": "William Davis",
+    "patientId": "P005",
+    "patientDOB": "1978-09-05",
+    "patientGender": "M",
+    "accessionNumber": "ACC20251115005",
+    "studyInstanceUID": "1.2.840.113619.2.55.3.2831164605.123.1234567890.5",
+    "studyDate": "2025-11-15",
+    "studyTime": "14:30:00",
+    "studyDescription": "CT Chest Abdomen Pelvis with Contrast",
+    "modality": "CT",
+    "status": "completed",
+    "priority": "urgent",
+    "referringPhysician": "Dr. Sarah Johnson",
+    "institution": "General Hospital",
+    "numberOfSeries": 6,
+    "numberOfInstances": 450,
+    "series": [
+      {
+        "seriesNumber": 1,
+        "seriesDescription": "Scout",
+        "instanceCount": 2,
+        "modality": "CT"
+      },
+      {
+        "seriesNumber": 2,
+        "seriesDescription": "Chest Arterial",
+        "instanceCount": 150,
+        "modality": "CT"
+      },
+      {
+        "seriesNumber": 3,
+        "seriesDescription": "Abdomen Arterial",
+        "instanceCount": 100,
+        "modality": "CT"
+      },
+      {
+        "seriesNumber": 4,
+        "seriesDescription": "Abdomen Portal Venous",
+        "instanceCount": 100,
+        "modality": "CT"
+      },
+      {
+        "seriesNumber": 5,
+        "seriesDescription": "Pelvis",
+        "instanceCount": 80,
+        "modality": "CT"
+      },
+      {
+        "seriesNumber": 6,
+        "seriesDescription": "Delayed",
+        "instanceCount": 18,
+        "modality": "CT"
+      }
+    ],
+    "thumbnailUrl": "/api/studies/5/thumbnail"
+  },
+  {
+    "id": 6,
+    "patientName": "Lisa Anderson",
+    "patientId": "P006",
+    "patientDOB": "1988-12-10",
+    "patientGender": "F",
+    "accessionNumber": "ACC20251115006",
+    "studyInstanceUID": "1.2.840.113619.2.55.3.2831164605.123.1234567890.6",
+    "studyDate": "2025-11-15",
+    "studyTime": "15:45:00",
+    "studyDescription": "MRI Brain with and without Contrast",
+    "modality": "MRI",
+    "status": "in-progress",
+    "priority": "routine",
+    "referringPhysician": "Dr. Michael Chen",
+    "institution": "General Hospital",
+    "numberOfSeries": 8,
+    "numberOfInstances": 320,
+    "series": [
+      {
+        "seriesNumber": 1,
+        "seriesDescription": "T1 Axial",
+        "instanceCount": 40,
+        "modality": "MRI"
+      },
+      {
+        "seriesNumber": 2,
+        "seriesDescription": "T2 Axial",
+        "instanceCount": 40,
+        "modality": "MRI"
+      },
+      {
+        "seriesNumber": 3,
+        "seriesDescription": "FLAIR Axial",
+        "instanceCount": 40,
+        "modality": "MRI"
+      },
+      {
+        "seriesNumber": 4,
+        "seriesDescription": "DWI",
+        "instanceCount": 40,
+        "modality": "MRI"
+      },
+      {
+        "seriesNumber": 5,
+        "seriesDescription": "ADC Map",
+        "instanceCount": 40,
+        "modality": "MRI"
+      },
+      {
+        "seriesNumber": 6,
+        "seriesDescription": "T1 Post Contrast Axial",
+        "instanceCount": 40,
+        "modality": "MRI"
+      },
+      {
+        "seriesNumber": 7,
+        "seriesDescription": "T1 Post Contrast Sagittal",
+        "instanceCount": 40,
+        "modality": "MRI"
+      },
+      {
+        "seriesNumber": 8,
+        "seriesDescription": "T1 Post Contrast Coronal",
+        "instanceCount": 40,
+        "modality": "MRI"
+      }
+    ],
+    "thumbnailUrl": "/api/studies/6/thumbnail"
+  }
+]

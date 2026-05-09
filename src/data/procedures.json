@@ -1,0 +1,23 @@
+[
+  {
+    "id": "rp-ct-head",
+    "code": "CT-HEAD",
+    "display": "CT Head Non-Contrast",
+    "body_part": "Head",
+    "laterality": null
+  },
+  {
+    "id": "rp-mr-knee",
+    "code": "MR-KNEE",
+    "display": "MRI Knee",
+    "body_part": "Knee",
+    "laterality": "Right"
+  },
+  {
+    "id": "rp-cr-chest",
+    "code": "CR-CHEST",
+    "display": "X-Ray Chest PA",
+    "body_part": "Chest",
+    "laterality": null
+  }
+]

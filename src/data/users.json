@@ -1,0 +1,64 @@
+[
+  {
+    "id": "u-100",
+    "name": "Rani Technologist",
+    "role": "technologist",
+    "tour_completed": false,
+    "tour_passed_at": null,
+    "tour_version": null,
+    "telegram": "5270235802",
+    "permissions": [
+      "worklist.view",
+      "order.view",
+      "intake.view",
+      "audit.view",
+      "modality.view",
+      "node.view",
+      "patient.view"
+    ]
+  },
+  {
+    "id": "u-101",
+    "name": "Arif Admin",
+    "role": "admin",
+    "tour_completed": false,
+    "tour_passed_at": null,
+    "tour_version": null,
+    "telegram": "5270235802",
+    "permissions": [
+      "*",
+      "worklist.view",
+      "order.view",
+      "audit.view",
+      "modality.view",
+      "node.view",
+      "patient.view"
+    ]
+  },
+  {
+    "id": "u-102",
+    "name": "Dina Clerk",
+    "role": "clerk",
+    "tour_completed": false,
+    "tour_passed_at": null,
+    "tour_version": null,
+    "telegram": "5270235802",
+    "permissions": [
+      "worklist.view",
+      "order.view",
+      "intake.view",
+      "patient.view"
+    ]
+  },
+  {
+    "id": "u-103",
+    "name": "Dr. Ahmad Wijaya",
+    "username": "admin.fatmawati",
+    "email": "admin@rsupfatmawati.id",
+    "role": "tenant_admin",
+    "tenant_id": "tenant-fatmawati",
+    "permissions": [
+      "*"
+    ]
+  }
+]

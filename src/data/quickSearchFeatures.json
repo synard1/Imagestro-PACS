@@ -1,0 +1,331 @@
+[
+    {
+        "id": "dashboard",
+        "title": "Dashboard",
+        "path": "/dashboard",
+        "keywords": [
+            "home",
+            "main",
+            "statistics",
+            "overview"
+        ],
+        "category": "General",
+        "permissions": [
+            "dashboard.view"
+        ]
+    },
+    {
+        "id": "worklist",
+        "title": "Radiology Worklist",
+        "path": "/worklist",
+        "keywords": [
+            "studies",
+            "exams",
+            "patients",
+            "dicom"
+        ],
+        "category": "PACS",
+        "permissions": [
+            "worklist.view"
+        ]
+    },
+    {
+        "id": "orders_new",
+        "title": "New Order",
+        "path": "/orders/new",
+        "keywords": [
+            "create order",
+            "request",
+            "exam"
+        ],
+        "category": "Orders",
+        "permissions": [
+            "order.create"
+        ]
+    },
+    {
+        "id": "orders_workflow",
+        "title": "Order Workflow",
+        "path": "/orders/workflow",
+        "keywords": [
+            "kanban",
+            "status",
+            "process",
+            "tracking"
+        ],
+        "category": "Orders",
+        "permissions": [
+            "order.view"
+        ]
+    },
+    {
+        "id": "orders_list",
+        "title": "All Orders",
+        "path": "/orders",
+        "keywords": [
+            "list",
+            "history",
+            "search orders"
+        ],
+        "category": "Orders",
+        "permissions": [
+            "order.view"
+        ]
+    },
+    {
+        "id": "reports",
+        "title": "Reports",
+        "path": "/reports",
+        "keywords": [
+            "results",
+            "findings",
+            "diagnosis"
+        ],
+        "category": "Reporting",
+        "permissions": [
+            "report.view"
+        ]
+    },
+    {
+        "id": "satusehat",
+        "title": "Satusehat Monitor",
+        "path": "/satusehat-monitor",
+        "keywords": [
+            "integration",
+            "ministry of health",
+            "moh",
+            "sync"
+        ],
+        "category": "Integration",
+        "permissions": [
+            "order.view"
+        ]
+    },
+    {
+        "id": "intake",
+        "title": "Intake Dashboard",
+        "path": "/pacs/intake",
+        "keywords": [
+            "reception",
+            "front desk",
+            "registration"
+        ],
+        "category": "PACS",
+        "permissions": [
+            "intake.view"
+        ]
+    },
+    {
+        "id": "studies",
+        "title": "Study List",
+        "path": "/studies",
+        "keywords": [
+            "dicom",
+            "images",
+            "pacs",
+            "search"
+        ],
+        "category": "PACS",
+        "permissions": [
+            "study.view"
+        ]
+    },
+    {
+        "id": "patients",
+        "title": "Patients",
+        "path": "/patients",
+        "keywords": [
+            "directory",
+            "people",
+            "demographics"
+        ],
+        "category": "Master Data",
+        "permissions": [
+            "patient.view"
+        ]
+    },
+    {
+        "id": "patients_new",
+        "title": "Register Patient",
+        "path": "/patients/new",
+        "keywords": [
+            "create patient",
+            "registration",
+            "new"
+        ],
+        "category": "Master Data",
+        "permissions": [
+            "patient.create"
+        ]
+    },
+    {
+        "id": "procedures",
+        "title": "Procedures",
+        "path": "/procedures",
+        "keywords": [
+            "exams",
+            "types",
+            "services"
+        ],
+        "category": "Master Data",
+        "permissions": [
+            "procedure.view"
+        ]
+    },
+    {
+        "id": "doctors",
+        "title": "Doctors",
+        "path": "/doctors",
+        "keywords": [
+            "physicians",
+            "radiologists",
+            "staff"
+        ],
+        "category": "Master Data",
+        "permissions": [
+            "doctor.view"
+        ]
+    },
+    {
+        "id": "modalities",
+        "title": "Modalities",
+        "path": "/modalities",
+        "keywords": [
+            "equipment",
+            "machines",
+            "ct",
+            "mri",
+            "xray"
+        ],
+        "category": "Configuration",
+        "permissions": [
+            "modality.view"
+        ]
+    },
+    {
+        "id": "dicom_nodes",
+        "title": "DICOM Nodes",
+        "path": "/dicom-nodes",
+        "keywords": [
+            "pacs",
+            "servers",
+            "aet",
+            "connectivity"
+        ],
+        "category": "Configuration",
+        "permissions": [
+            "node.view"
+        ]
+    },
+    {
+        "id": "users",
+        "title": "User Management",
+        "path": "/users",
+        "keywords": [
+            "accounts",
+            "staff",
+            "login",
+            "access"
+        ],
+        "category": "Admin",
+        "permissions": [
+            "user:read"
+        ]
+    },
+    {
+        "id": "roles",
+        "title": "Roles & Permissions",
+        "path": "/roles",
+        "keywords": [
+            "access control",
+            "rbac",
+            "security",
+            "groups"
+        ],
+        "category": "Admin",
+        "permissions": [
+            "user:read"
+        ]
+    },
+    {
+        "id": "audit_logs",
+        "title": "Audit Logs",
+        "path": "/audit-logs",
+        "keywords": [
+            "history",
+            "tracking",
+            "security",
+            "activity"
+        ],
+        "category": "Admin",
+        "permissions": [
+            "audit.view"
+        ]
+    },
+    {
+        "id": "storage",
+        "title": "Storage Management",
+        "path": "/storage-management",
+        "keywords": [
+            "disk",
+            "space",
+            "lifecycle",
+            "archive"
+        ],
+        "category": "Admin",
+        "permissions": [
+            "storage.manage"
+        ]
+    },
+    {
+        "id": "settings",
+        "title": "Settings",
+        "path": "/settings",
+        "keywords": [
+            "configuration",
+            "preferences",
+            "system"
+        ],
+        "category": "General",
+        "permissions": []
+    },
+    {
+        "id": "profile",
+        "title": "My Profile",
+        "path": "/profile",
+        "keywords": [
+            "account",
+            "password",
+            "personal"
+        ],
+        "category": "General",
+        "permissions": []
+    },
+    {
+        "id": "dicom_upload",
+        "title": "DICOM Upload",
+        "path": "/dicom-upload",
+        "keywords": [
+            "import",
+            "upload",
+            "files",
+            "cd"
+        ],
+        "category": "Tools",
+        "permissions": [
+            "studies.upload"
+        ]
+    },
+    {
+        "id": "uid_generator",
+        "title": "UID Generator",
+        "path": "/dicom-uid-generator",
+        "keywords": [
+            "tool",
+            "utility",
+            "dicom"
+        ],
+        "category": "Tools",
+        "permissions": []
+    }
+]
