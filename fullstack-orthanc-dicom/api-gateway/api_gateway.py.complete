@@ -1,0 +1,153 @@
+"""
+API Gateway - Consolidated & Fixed Version
+"""
+
+import os
+import sys
+import logging
+from flask import Flask, request, jsonify, Response
+from flask_cors import CORS
+import jwt
+import requests
+from functools import wraps
+
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', stream=sys.stdout)
+logger = logging.getLogger(__name__)
+
+app = Flask(__name__)
+
+# CORS configuration
+CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:5173,http://127.0.0.1:5173,http://100.113.207.79:8082')
+origins = [origin.strip() for origin in CORS_ALLOWED_ORIGINS.split(',')]
+CORS(app, origins=origins, supports_credentials=True)
+
+# Configuration
+JWT_SECRET = os.getenv('JWT_SECRET', 'e665d53ba3f71313a7fc60b24cd17cb4dc7ba53df1846b544d27c99d5a2ab79d')
+JWT_ALGORITHM = 'HS256'
+
+# Service URLs
+AUTH_SERVICE_URL = os.getenv('AUTH_SERVICE_URL', 'http://auth-service:5000')
+ORDER_SERVICE_URL = os.getenv('ORDER_SERVICE_URL', 'http://order-management:8001')
+MASTER_DATA_SERVICE_URL = os.getenv('MASTER_DATA_SERVICE_URL', 'http://master-data-service:8002')
+PAC_SERVICE_URL = os.getenv('PAC_SERVICE_URL', 'http://pacs-service:8003')
+
+def validate_token(token):
+    """Validate JWT token without expiration check for testing"""
+    try:
+        return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM], options={"verify_exp": False})
+    except Exception as e:
+        logger.warning(f"JWT validation failed: {str(e)}")
+        return None
+
+def proxy_request(base_url, path, method, data=None, params=None):
+    """Unified proxy helper with JSON forwarding fix"""
+    url = f"{base_url.rstrip('/')}/{path.lstrip('/')}"
+    headers = {k: v for k, v in request.headers if k.lower() not in ['host', 'content-length']}
+    
+    # Fix for POST/PUT requests: ensure data is passed correctly
+    if request.is_json:
+        data = request.get_json(silent=True)
+
+    try:
+        resp = requests.request(
+            method=method, url=url, json=data, params=params, headers=headers, timeout=30
+        )
+        excluded = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
+        resp_headers = {k: v for k, v in resp.headers.items() if k.lower() not in excluded}
+        return Response(resp.content, status=resp.status_code, headers=resp_headers)
+    except Exception as e:
+        logger.error(f"Proxy error {method} {url}: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 503
+
+def require_auth(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if request.method == 'OPTIONS': return ('', 204)
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return jsonify({"status": "error", "message": "Unauthorized"}), 401
+        user = validate_token(auth_header.split(' ')[1])
+        if not user: return jsonify({"status": "error", "message": "Invalid token"}), 401
+        request.current_user = user
+        return f(*args, **kwargs)
+    return decorated
+
+@app.route('/health')
+def health(): return jsonify({"status": "healthy", "service": "api-gateway"})
+
+# --- AUTH ROUTES ---
+@app.route('/auth/login', methods=['POST'])
+def login():
+    return proxy_request(AUTH_SERVICE_URL, 'auth/login', 'POST', data=request.get_json(silent=True))
+
+@app.route('/auth/verify', methods=['POST'])
+def verify():
+    return proxy_request(AUTH_SERVICE_URL, 'auth/verify', 'POST', data=request.get_json(silent=True))
+
+# --- ORDER ROUTES (Including SATUSEHAT Monitor) ---
+@app.route('/orders', defaults={'path': ''}, methods=['GET', 'POST'])
+@app.route('/orders/<path:path>', methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])
+@require_auth
+def orders_proxy(path):
+    target = f"orders/{path}" if path else "orders"
+    return proxy_request(ORDER_SERVICE_URL, target, request.method, params=request.args)
+
+@app.route('/order-procedures/<path:path>', methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])
+@require_auth
+def order_proc_proxy(path):
+    return proxy_request(ORDER_SERVICE_URL, f"order-procedures/{path}", request.method, params=request.args)
+
+@app.route('/api/monitor/satusehat/orders', methods=['GET'])
+@require_auth
+def ss_monitor_proxy():
+    # Alias mapping: UI calls /api/monitor/satusehat/orders -> backend has /orders/satusehat-status
+    return proxy_request(ORDER_SERVICE_URL, "orders/satusehat-status", "GET", params=request.args)
+
+@app.route('/orders/satusehat-status', methods=['GET'])
+@require_auth
+def ss_order_status_proxy():
+    return proxy_request(ORDER_SERVICE_URL, "orders/satusehat-status", "GET", params=request.args)
+
+# --- MASTER DATA ROUTES ---
+@app.route('/patients', defaults={'path': ''}, methods=['GET', 'POST'])
+@app.route('/patients/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE'])
+@require_auth
+def patients_proxy(path):
+    target = f"patients/{path}" if path else "patients"
+    return proxy_request(MASTER_DATA_SERVICE_URL, target, request.method, params=request.args)
+
+@app.route('/doctors', defaults={'path': ''}, methods=['GET', 'POST'])
+@app.route('/doctors/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE'])
+@require_auth
+def doctors_proxy(path):
+    target = f"doctors/{path}" if path else "doctors"
+    return proxy_request(MASTER_DATA_SERVICE_URL, target, request.method, params=request.args)
+
+@app.route('/procedures', defaults={'path': ''}, methods=['GET', 'POST'])
+@app.route('/procedures/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE'])
+@require_auth
+def procedures_proxy(path):
+    target = f"procedures/{path}" if path else "procedures"
+    return proxy_request(MASTER_DATA_SERVICE_URL, target, request.method, params=request.args)
+
+@app.route('/settings', defaults={'path': ''}, methods=['GET', 'POST'])
+@app.route('/settings/<path:path>', methods=['GET', 'PUT', 'DELETE'])
+@require_auth
+def settings_proxy(path):
+    target = f"settings/{path}" if path else "settings"
+    return proxy_request(MASTER_DATA_SERVICE_URL, target, request.method, params=request.args)
+
+# --- PACS CATCH-ALL ---
+@app.route('/api', defaults={'path': ''}, methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'])
+@app.route('/api/<path:path>', methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'])
+def api_proxy(path):
+    target = f"api/{path}" if path else "api"
+    return proxy_request(PAC_SERVICE_URL, target, request.method, params=request.args)
+
+@app.route('/wado-rs/<path:path>', methods=['GET', 'OPTIONS'])
+def wado_proxy(path):
+    return proxy_request(PAC_SERVICE_URL, f"wado-rs/{path}", "GET", params=request.args)
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=8888)

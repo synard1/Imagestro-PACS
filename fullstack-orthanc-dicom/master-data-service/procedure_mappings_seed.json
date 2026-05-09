@@ -1,0 +1,202 @@
+[
+  {
+    "external_system_code": "SIMRS_RSUD",
+    "external_code": "RAD-001",
+    "external_name": "Foto Thorax 2 Posisi",
+    "external_description": "Pemeriksaan radiologi thorax dengan 2 posisi (PA dan Lateral)",
+    "pacs_procedure_code": "CR-CHEST-2V",
+    "mapping_type": "exact",
+    "confidence_level": 100,
+    "notes": "Mapping 1:1 langsung dari SIMRS ke PACS"
+  },
+  {
+    "external_system_code": "SIMRS_RSUD",
+    "external_code": "RAD-002",
+    "external_name": "CT Scan Kepala Tanpa Kontras",
+    "external_description": "CT Scan kepala non contrast untuk evaluasi trauma atau stroke",
+    "pacs_procedure_code": "CT-HEAD-WO",
+    "mapping_type": "exact",
+    "confidence_level": 100,
+    "notes": "Standard CT head non contrast"
+  },
+  {
+    "external_system_code": "SIMRS_RSUD",
+    "external_code": "RAD-003",
+    "external_name": "CT Scan Thorax Plain",
+    "external_description": "CT Scan thorax tanpa kontras",
+    "pacs_procedure_code": "CT-CHEST-WO",
+    "mapping_type": "exact",
+    "confidence_level": 100,
+    "notes": "CT thorax non contrast"
+  },
+  {
+    "external_system_code": "SIMRS_RSUD",
+    "external_code": "RAD-004",
+    "external_name": "CT Scan Abdomen dengan Kontras",
+    "external_description": "CT Scan abdomen menggunakan kontras intravena",
+    "pacs_procedure_code": "CT-ABDOMEN-WC",
+    "mapping_type": "exact",
+    "confidence_level": 100,
+    "notes": "CT abdomen with IV contrast"
+  },
+  {
+    "external_system_code": "SIMRS_RSUD",
+    "external_code": "RAD-005",
+    "external_name": "MRI Kepala Non Kontras",
+    "external_description": "MRI brain tanpa gadolinium",
+    "pacs_procedure_code": "MRI-BRAIN-WO",
+    "mapping_type": "exact",
+    "confidence_level": 100,
+    "notes": "MRI brain without contrast"
+  },
+  {
+    "external_system_code": "SIMRS_RSUD",
+    "external_code": "RAD-010",
+    "external_name": "USG Abdomen Lengkap",
+    "external_description": "Ultrasonografi abdomen komplet termasuk hepar, GB, pankreas, lien, ginjal",
+    "pacs_procedure_code": "US-ABDOMEN",
+    "mapping_type": "exact",
+    "confidence_level": 100,
+    "notes": "Complete abdominal ultrasound"
+  },
+  {
+    "external_system_code": "SIMRS_RSUD",
+    "external_code": "RAD-015",
+    "external_name": "Mammografi Bilateral",
+    "external_description": "Pemeriksaan mammografi kedua payudara untuk skrining",
+    "pacs_procedure_code": "MAMMO-BILATERAL",
+    "mapping_type": "exact",
+    "confidence_level": 100,
+    "notes": "Bilateral mammography screening"
+  },
+  {
+    "external_system_code": "HIS_SILOAM",
+    "external_code": "IMG-CHEST-X2",
+    "external_name": "Chest X-Ray 2 Views",
+    "external_description": "Chest radiograph PA and Lateral views",
+    "pacs_procedure_code": "CR-CHEST-2V",
+    "mapping_type": "exact",
+    "confidence_level": 100,
+    "notes": "HIS Siloam chest x-ray code"
+  },
+  {
+    "external_system_code": "HIS_SILOAM",
+    "external_code": "IMG-CT-HEAD",
+    "external_name": "CT Brain Plain",
+    "external_description": "Non-contrast CT scan of brain",
+    "pacs_procedure_code": "CT-HEAD-WO",
+    "mapping_type": "exact",
+    "confidence_level": 100,
+    "notes": "Siloam CT head standard protocol"
+  },
+  {
+    "external_system_code": "HIS_SILOAM",
+    "external_code": "IMG-MRI-BRAIN",
+    "external_name": "MRI Brain without Gadolinium",
+    "external_description": "Brain MRI non-contrast study",
+    "pacs_procedure_code": "MRI-BRAIN-WO",
+    "mapping_type": "exact",
+    "confidence_level": 100,
+    "notes": "Standard brain MRI protocol"
+  },
+  {
+    "external_system_code": "HIS_SILOAM",
+    "external_code": "IMG-US-ABD",
+    "external_name": "Abdominal Ultrasound Complete",
+    "external_description": "Complete abdominal sonography",
+    "pacs_procedure_code": "US-ABDOMEN",
+    "mapping_type": "exact",
+    "confidence_level": 100,
+    "notes": "Complete abdomen US"
+  },
+  {
+    "external_system_code": "HIS_SILOAM",
+    "external_code": "IMG-MAMMO-SCR",
+    "external_name": "Bilateral Mammogram Screening",
+    "external_description": "Screening mammography both breasts",
+    "pacs_procedure_code": "MAMMO-BILATERAL",
+    "mapping_type": "exact",
+    "confidence_level": 100,
+    "notes": "Mammography screening protocol"
+  },
+  {
+    "external_system_code": "RIS_MEDIS",
+    "external_code": "XR.CHEST.2V",
+    "external_name": "Rontgen Dada 2 Proyeksi",
+    "external_description": "Chest radiography 2 views PA & Lateral",
+    "pacs_procedure_code": "CR-CHEST-2V",
+    "mapping_type": "exact",
+    "confidence_level": 100,
+    "notes": "RIS Medis chest x-ray"
+  },
+  {
+    "external_system_code": "RIS_MEDIS",
+    "external_code": "CT.HEAD.NC",
+    "external_name": "CT Kepala Non Kontras",
+    "external_description": "CT scan kepala tanpa media kontras",
+    "pacs_procedure_code": "CT-HEAD-WO",
+    "mapping_type": "exact",
+    "confidence_level": 100,
+    "notes": "CT head non-contrast"
+  },
+  {
+    "external_system_code": "RIS_MEDIS",
+    "external_code": "MR.BRAIN.PLAIN",
+    "external_name": "MRI Otak Plain",
+    "external_description": "MRI brain without contrast agent",
+    "pacs_procedure_code": "MRI-BRAIN-WO",
+    "mapping_type": "exact",
+    "confidence_level": 100,
+    "notes": "Brain MRI plain"
+  },
+  {
+    "external_system_code": "RIS_MEDIS",
+    "external_code": "US.ABDOMEN",
+    "external_name": "USG Perut Lengkap",
+    "external_description": "Ultrasonografi abdomen komprehensif",
+    "pacs_procedure_code": "US-ABDOMEN",
+    "mapping_type": "exact",
+    "confidence_level": 100,
+    "notes": "Abdominal ultrasound"
+  },
+  {
+    "external_system_code": "RIS_MEDIS",
+    "external_code": "MG.BILATERAL",
+    "external_name": "Mamografi 2 Payudara",
+    "external_description": "Pemeriksaan mammografi bilateral",
+    "pacs_procedure_code": "MAMMO-BILATERAL",
+    "mapping_type": "exact",
+    "confidence_level": 100,
+    "notes": "Bilateral mammography"
+  },
+  {
+    "external_system_code": "SIMRS_RSUD",
+    "external_code": "RAD-020",
+    "external_name": "Foto Lumbal AP/Lateral",
+    "external_description": "X-ray lumbar spine 2 views",
+    "pacs_procedure_code": "XR-SPINE-LUMBAR",
+    "mapping_type": "exact",
+    "confidence_level": 100,
+    "notes": "Lumbar spine radiography"
+  },
+  {
+    "external_system_code": "SIMRS_RSUD",
+    "external_code": "RAD-025",
+    "external_name": "MRI Tulang Belakang Lumbal",
+    "external_description": "MRI lumbar spine without contrast",
+    "pacs_procedure_code": "MRI-SPINE-LUMBAR",
+    "mapping_type": "exact",
+    "confidence_level": 100,
+    "notes": "Lumbar spine MRI"
+  },
+  {
+    "external_system_code": "SIMRS_RSUD",
+    "external_code": "RAD-030",
+    "external_name": "USG Pelvis",
+    "external_description": "Ultrasonografi pelvis transabdominal",
+    "pacs_procedure_code": "US-PELVIS",
+    "mapping_type": "exact",
+    "confidence_level": 100,
+    "notes": "Pelvic ultrasound"
+  }
+]

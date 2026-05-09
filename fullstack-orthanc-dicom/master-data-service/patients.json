@@ -1,0 +1,110 @@
+[
+  {
+    "_meta": {
+      "protected": true,
+      "purpose": "SATUSEHAT testing data - READ ONLY",
+      "warning": "Do not modify this data. It is used for official SATUSEHAT integration testing.",
+      "source": "https://satusehat.kemkes.go.id/platform/docs/id/api-catalogue/onboardings/apis/patient/"
+    }
+  },
+  {
+    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "patient_national_id": "9271060312000001",
+    "ihs_number": "P02478375538",
+    "medical_record_number": "10000001",
+    "name": "Ardianto Putra",
+    "birth_date": "1992-01-09",
+    "gender": "M",
+    "phone": "+62-812-0001-0001"
+  },
+  {
+    "id": "b2c3d4e5-f6a7-8901-bcde-f23456789012",
+    "patient_national_id": "9204014804000002",
+    "ihs_number": "P03647103112",
+    "medical_record_number": "10000002",
+    "name": "Claudia Sintia",
+    "birth_date": "1989-11-03",
+    "gender": "F",
+    "phone": "+62-812-0002-0002"
+  },
+  {
+    "id": "c3d4e5f6-a7b8-9012-cdef-345678901234",
+    "patient_national_id": "9104224509000003",
+    "ihs_number": "P00805884304",
+    "medical_record_number": "10000003",
+    "name": "Elizabeth Dior",
+    "birth_date": "1976-07-07",
+    "gender": "F",
+    "phone": "+62-812-0003-0003"
+  },
+  {
+    "id": "d4e5f6a7-b8c9-0123-def0-456789012345",
+    "patient_national_id": "9104223107000004",
+    "ihs_number": "P00912894463",
+    "medical_record_number": "10000004",
+    "name": "Dr. Alan Bagus Prasetya",
+    "birth_date": "1977-09-03",
+    "gender": "M",
+    "phone": "+62-812-0004-0004"
+  },
+  {
+    "id": "e5f6a7b8-c9d0-1234-ef01-567890123456",
+    "patient_national_id": "9104224606000005",
+    "ihs_number": "P01654557057",
+    "medical_record_number": "10000005",
+    "name": "Ghina Assyifa",
+    "birth_date": "2004-08-21",
+    "gender": "F",
+    "phone": "+62-812-0005-0005"
+  },
+  {
+    "id": "f6a7b8c9-d0e1-2345-f012-678901234567",
+    "patient_national_id": "9104025209000006",
+    "ihs_number": "P02280547535",
+    "medical_record_number": "10000006",
+    "name": "Salsabilla Anjani Rizki",
+    "birth_date": "2001-04-16",
+    "gender": "F",
+    "phone": "+62-812-0006-0006"
+  },
+  {
+    "id": "07b8c9d0-e1f2-3456-0123-789012345678",
+    "patient_national_id": "9201076001000007",
+    "ihs_number": "P01836748436",
+    "medical_record_number": "10000007",
+    "name": "Theodore Elisjah",
+    "birth_date": "1985-09-18",
+    "gender": "F",
+    "phone": "+62-812-0007-0007"
+  },
+  {
+    "id": "18c9d0e1-f2a3-4567-1234-890123456789",
+    "patient_national_id": "9201394901000008",
+    "ihs_number": "P00883356749",
+    "medical_record_number": "10000008",
+    "name": "Sonia Herdianti",
+    "birth_date": "1996-06-08",
+    "gender": "F",
+    "phone": "+62-812-0008-0008"
+  },
+  {
+    "id": "29d0e1f2-a3b4-5678-2345-901234567890",
+    "patient_national_id": "9201076407000009",
+    "ihs_number": "P01058967035",
+    "medical_record_number": "10000009",
+    "name": "Nancy Wang",
+    "birth_date": "1955-10-10",
+    "gender": "F",
+    "phone": "+62-812-0009-0009"
+  },
+  {
+    "id": "3ae1f2a3-b4c5-6789-3456-012345678901",
+    "patient_national_id": "9210060207000010",
+    "ihs_number": "P02428473601",
+    "medical_record_number": "10000010",
+    "name": "Syarif Muhammad",
+    "birth_date": "1988-11-02",
+    "gender": "M",
+    "phone": "+62-812-0010-0010"
+  }
+]

@@ -1,0 +1,4 @@
+node_modules
+.git
+Dockerfile
+# bun.lockb  <-- hapus/komentari baris ini jika sebelumnya ada

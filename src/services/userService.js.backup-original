@@ -1,0 +1,698 @@
+/**
+ * User Management Service
+ * Handles all API calls related to user management, roles, and permissions
+ * Supports both backend API and local mock data based on api-registry config
+ */
+
+import { getAuth, isExpired } from './auth-storage';
+import { loadRegistry } from './api-registry';
+import * as mockUserService from './mockUserService';
+
+// Load registry to check if users service is enabled
+const getConfig = () => {
+  const registry = loadRegistry();
+  return registry.users || { enabled: false, baseUrl: 'http://103.42.117.19:8888' };
+};
+
+// Get base URL from config or use default
+const getBaseUrl = () => {
+  const config = getConfig();
+  return config.baseUrl || 'http://103.42.117.19:8888';
+};
+
+// Check if backend is enabled
+const isBackendEnabled = () => {
+  const config = getConfig();
+  return config.enabled === true;
+};
+
+/**
+ * Get authorization header with JWT token
+ */
+const getAuthHeader = () => {
+  const auth = getAuth();
+
+  if (!auth || !auth.access_token) {
+    throw new Error('No authentication token found. Please login again.');
+  }
+
+  if (isExpired(auth)) {
+    throw new Error('Authentication token has expired. Please login again.');
+  }
+
+  const tokenType = auth.token_type || 'Bearer';
+
+  return {
+    'Authorization': `${tokenType} ${auth.access_token}`,
+    'Content-Type': 'application/json',
+  };
+};
+
+/**
+ * Handle API response
+ */
+const handleResponse = async (response) => {
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.message || `HTTP error! status: ${response.status}`);
+  }
+
+  return data;
+};
+
+/**
+ * Backend API call wrapper
+ */
+const backendFetch = async (endpoint, options = {}) => {
+  const BASE_URL = getBaseUrl();
+  const response = await fetch(`${BASE_URL}${endpoint}`, options);
+  return handleResponse(response);
+};
+
+// ============================================
+// Authentication Endpoints
+// ============================================
+
+/**
+ * Login user
+ * NOTE: Consider using loginBackend from authService.js instead
+ * This is kept for compatibility but authService handles token storage
+ * @param {string} username
+ * @param {string} password
+ * @returns {Promise<Object>} Login response with token and user info
+ */
+export const login = async (username, password) => {
+  const response = await fetch(`${BASE_URL}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  });
+
+  const data = await handleResponse(response);
+
+  // Token storage is handled by authService
+  // This function is kept for compatibility but consider using authService.loginBackend()
+
+  return data;
+};
+
+/**
+ * Register new user (public endpoint)
+ * @param {Object} userData - User registration data
+ * @returns {Promise<Object>} Registration response
+ */
+export const register = async (userData) => {
+  const response = await fetch(`${BASE_URL}/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(userData),
+  });
+
+  return handleResponse(response);
+};
+
+/**
+ * Get current user profile
+ * @returns {Promise<Object>} Current user profile
+ */
+export const getCurrentUser = async () => {
+  const response = await fetch(`${BASE_URL}/auth/me`, {
+    headers: getAuthHeader(),
+  });
+
+  return handleResponse(response);
+};
+
+/**
+ * Change current user password
+ * @param {string} currentPassword
+ * @param {string} newPassword
+ * @returns {Promise<Object>} Success response
+ */
+export const changePassword = async (currentPassword, newPassword) => {
+  const response = await fetch(`${BASE_URL}/auth/change-password`, {
+    method: 'POST',
+    headers: getAuthHeader(),
+    body: JSON.stringify({
+      current_password: currentPassword,
+      new_password: newPassword,
+    }),
+  });
+
+  return handleResponse(response);
+};
+
+/**
+ * Logout user
+ * NOTE: Consider using logoutBackend from authService.js instead
+ * This is kept for compatibility
+ */
+export const logout = () => {
+  // Import clearAuth from auth-storage if needed
+  // Or recommend using authService.logoutBackend() which handles everything
+  console.warn('userService.logout() called - consider using authService.logoutBackend() instead');
+};
+
+// ============================================
+// User Management Endpoints (Admin)
+// ============================================
+
+/**
+ * Get list of users with pagination and filters
+ * @param {Object} params - Query parameters
+ * @param {number} params.page - Page number (default: 1)
+ * @param {number} params.limit - Items per page (default: 20)
+ * @param {string} params.search - Search query
+ * @param {string} params.role - Filter by role
+ * @returns {Promise<Object>} Users list with pagination
+ */
+export const getUsers = async (params = {}) => {
+  // Check if backend is enabled
+  if (!isBackendEnabled()) {
+    return mockUserService.getUsers(params);
+  }
+
+  // Backend implementation
+  const queryParams = new URLSearchParams({
+    page: params.page || 1,
+    limit: params.limit || 20,
+    ...(params.search && { search: params.search }),
+    ...(params.role && { role: params.role }),
+  });
+
+  return backendFetch(`/auth/users?${queryParams}`, {
+    headers: getAuthHeader(),
+  });
+};
+
+/**
+ * Get user by ID
+ * @param {string} userId - User ID
+ * @returns {Promise<Object>} User details
+ */
+export const getUserById = async (userId) => {
+  const response = await fetch(`${BASE_URL}/auth/users/${userId}`, {
+    headers: getAuthHeader(),
+  });
+
+  return handleResponse(response);
+};
+
+/**
+ * Create new user (Admin)
+ * @param {Object} userData - User data
+ * @returns {Promise<Object>} Created user
+ */
+export const createUser = async (userData) => {
+  const response = await fetch(`${BASE_URL}/auth/users`, {
+    method: 'POST',
+    headers: getAuthHeader(),
+    body: JSON.stringify(userData),
+  });
+
+  return handleResponse(response);
+};
+
+/**
+ * Update user
+ * @param {string} userId - User ID
+ * @param {Object} userData - Updated user data
+ * @returns {Promise<Object>} Updated user
+ */
+export const updateUser = async (userId, userData) => {
+  const response = await fetch(`${BASE_URL}/auth/users/${userId}`, {
+    method: 'PUT',
+    headers: getAuthHeader(),
+    body: JSON.stringify(userData),
+  });
+
+  return handleResponse(response);
+};
+
+/**
+ * Delete user (soft delete)
+ * @param {string} userId - User ID
+ * @returns {Promise<Object>} Success response
+ */
+export const deleteUser = async (userId) => {
+  const response = await fetch(`${BASE_URL}/auth/users/${userId}`, {
+    method: 'DELETE',
+    headers: getAuthHeader(),
+  });
+
+  return handleResponse(response);
+};
+
+/**
+ * Change user password (Admin)
+ * @param {string} userId - User ID
+ * @param {string} newPassword - New password
+ * @returns {Promise<Object>} Success response
+ */
+export const changeUserPassword = async (userId, newPassword) => {
+  const response = await fetch(`${BASE_URL}/auth/users/${userId}/change-password`, {
+    method: 'POST',
+    headers: getAuthHeader(),
+    body: JSON.stringify({ new_password: newPassword }),
+  });
+
+  return handleResponse(response);
+};
+
+/**
+ * Activate user account
+ * @param {string} userId - User ID
+ * @returns {Promise<Object>} Success response
+ */
+export const activateUser = async (userId) => {
+  const response = await fetch(`${BASE_URL}/auth/users/${userId}/activate`, {
+    method: 'POST',
+    headers: getAuthHeader(),
+  });
+
+  return handleResponse(response);
+};
+
+/**
+ * Deactivate user account
+ * @param {string} userId - User ID
+ * @returns {Promise<Object>} Success response
+ */
+export const deactivateUser = async (userId) => {
+  const response = await fetch(`${BASE_URL}/auth/users/${userId}/deactivate`, {
+    method: 'POST',
+    headers: getAuthHeader(),
+  });
+
+  return handleResponse(response);
+};
+
+// ============================================
+// Role Management Endpoints
+// ============================================
+
+/**
+ * Get all roles
+ * @returns {Promise<Object>} List of roles
+ */
+export const getRoles = async () => {
+  const response = await fetch(`${BASE_URL}/auth/roles`, {
+    headers: getAuthHeader(),
+  });
+
+  return handleResponse(response);
+};
+
+/**
+ * Get role by name
+ * @param {string} roleName - Role name
+ * @returns {Promise<Object>} Role details
+ */
+export const getRoleByName = async (roleName) => {
+  const response = await fetch(`${BASE_URL}/auth/roles/${roleName}`, {
+    headers: getAuthHeader(),
+  });
+
+  return handleResponse(response);
+};
+
+/**
+ * Get role by ID
+ * @param {string} roleId - Role ID
+ * @returns {Promise<Object>} Role details
+ */
+export const getRole = async (roleId) => {
+  const response = await fetch(`${BASE_URL}/auth/roles/${roleId}`, {
+    headers: getAuthHeader(),
+  });
+
+  return handleResponse(response);
+};
+
+/**
+ * Create new role
+ * @param {Object} roleData - Role data
+ * @returns {Promise<Object>} Created role
+ */
+export const createRole = async (roleData) => {
+  const response = await fetch(`${BASE_URL}/auth/roles`, {
+    method: 'POST',
+    headers: getAuthHeader(),
+    body: JSON.stringify(roleData),
+  });
+
+  return handleResponse(response);
+};
+
+/**
+ * Update role
+ * @param {string} roleId - Role ID
+ * @param {Object} roleData - Updated role data
+ * @returns {Promise<Object>} Updated role
+ */
+export const updateRole = async (roleId, roleData) => {
+  const response = await fetch(`${BASE_URL}/auth/roles/${roleId}`, {
+    method: 'PUT',
+    headers: getAuthHeader(),
+    body: JSON.stringify(roleData),
+  });
+
+  return handleResponse(response);
+};
+
+/**
+ * Delete role
+ * @param {string} roleId - Role ID
+ * @returns {Promise<Object>} Success response
+ */
+export const deleteRole = async (roleId) => {
+  const response = await fetch(`${BASE_URL}/auth/roles/${roleId}`, {
+    method: 'DELETE',
+    headers: getAuthHeader(),
+  });
+
+  return handleResponse(response);
+};
+
+/**
+ * Get users in a role
+ * @param {string} roleName - Role name
+ * @returns {Promise<Object>} List of users
+ */
+export const getUsersInRole = async (roleName) => {
+  const response = await fetch(`${BASE_URL}/auth/roles/${roleName}/users`, {
+    headers: getAuthHeader(),
+  });
+
+  return handleResponse(response);
+};
+
+/**
+ * Get role permissions
+ * @param {string} roleId - Role ID
+ * @returns {Promise<Object>} Role permissions
+ */
+export const getRolePermissions = async (roleId) => {
+  const response = await fetch(`${BASE_URL}/auth/roles/${roleId}/permissions`, {
+    headers: getAuthHeader(),
+  });
+
+  return handleResponse(response);
+};
+
+/**
+ * Assign permission to role
+ * @param {string} roleId - Role ID
+ * @param {string} permissionId - Permission ID
+ * @returns {Promise<Object>} Success response
+ */
+export const assignPermissionToRole = async (roleId, permissionId) => {
+  const response = await fetch(`${BASE_URL}/auth/roles/${roleId}/permissions`, {
+    method: 'POST',
+    headers: getAuthHeader(),
+    body: JSON.stringify({ permission_id: permissionId }),
+  });
+
+  return handleResponse(response);
+};
+
+/**
+ * Remove permission from role
+ * @param {string} roleId - Role ID
+ * @param {string} permissionId - Permission ID
+ * @returns {Promise<Object>} Success response
+ */
+export const removePermissionFromRole = async (roleId, permissionId) => {
+  const response = await fetch(`${BASE_URL}/auth/roles/${roleId}/permissions/${permissionId}`, {
+    method: 'DELETE',
+    headers: getAuthHeader(),
+  });
+
+  return handleResponse(response);
+};
+
+// ============================================
+// Permission Management Endpoints
+// ============================================
+
+/**
+ * Get all permissions
+ * @returns {Promise<Object>} List of permissions
+ */
+export const getPermissions = async () => {
+  const response = await fetch(`${BASE_URL}/auth/permissions`, {
+    headers: getAuthHeader(),
+  });
+
+  return handleResponse(response);
+};
+
+/**
+ * Create new permission
+ * @param {Object} permissionData - Permission data
+ * @returns {Promise<Object>} Created permission
+ */
+export const createPermission = async (permissionData) => {
+  const response = await fetch(`${BASE_URL}/auth/permissions`, {
+    method: 'POST',
+    headers: getAuthHeader(),
+    body: JSON.stringify(permissionData),
+  });
+
+  return handleResponse(response);
+};
+
+/**
+ * Get permission by ID
+ * @param {string} permissionId - Permission ID
+ * @returns {Promise<Object>} Permission details
+ */
+export const getPermission = async (permissionId) => {
+  const response = await fetch(`${BASE_URL}/auth/permissions/${permissionId}`, {
+    headers: getAuthHeader(),
+  });
+
+  return handleResponse(response);
+};
+
+/**
+ * Update permission
+ * @param {string} permissionId - Permission ID
+ * @param {Object} permissionData - Updated permission data
+ * @returns {Promise<Object>} Updated permission
+ */
+export const updatePermission = async (permissionId, permissionData) => {
+  const response = await fetch(`${BASE_URL}/auth/permissions/${permissionId}`, {
+    method: 'PUT',
+    headers: getAuthHeader(),
+    body: JSON.stringify(permissionData),
+  });
+
+  return handleResponse(response);
+};
+
+/**
+ * Delete permission
+ * @param {string} permissionId - Permission ID
+ * @returns {Promise<Object>} Success response
+ */
+export const deletePermission = async (permissionId) => {
+  const response = await fetch(`${BASE_URL}/auth/permissions/${permissionId}`, {
+    method: 'DELETE',
+    headers: getAuthHeader(),
+  });
+
+  return handleResponse(response);
+};
+
+/**
+ * Check if user has permission
+ * @param {string} permission - Permission name
+ * @returns {Promise<Object>} Permission check result
+ */
+export const checkPermission = async (permission) => {
+  const response = await fetch(`${BASE_URL}/auth/permissions/check`, {
+    method: 'POST',
+    headers: getAuthHeader(),
+    body: JSON.stringify({ permission }),
+  });
+
+  return handleResponse(response);
+};
+
+// ============================================
+// User-Role Assignment Endpoints
+// ============================================
+
+/**
+ * Get user roles
+ * @param {string} userId - User ID
+ * @returns {Promise<Object>} User roles
+ */
+export const getUserRoles = async (userId) => {
+  const response = await fetch(`${BASE_URL}/auth/users/${userId}/roles`, {
+    headers: getAuthHeader(),
+  });
+
+  return handleResponse(response);
+};
+
+/**
+ * Assign role to user
+ * @param {string} userId - User ID
+ * @param {string} roleId - Role ID (or use roleName)
+ * @param {string} roleName - Role name (alternative to roleId)
+ * @returns {Promise<Object>} Success response
+ */
+export const assignRoleToUser = async (userId, roleId = null, roleName = null) => {
+  const body = roleId ? { role_id: roleId } : { role_name: roleName };
+
+  const response = await fetch(`${BASE_URL}/auth/users/${userId}/roles`, {
+    method: 'POST',
+    headers: getAuthHeader(),
+    body: JSON.stringify(body),
+  });
+
+  return handleResponse(response);
+};
+
+/**
+ * Remove role from user
+ * @param {string} userId - User ID
+ * @param {string} roleId - Role ID
+ * @returns {Promise<Object>} Success response
+ */
+export const removeRoleFromUser = async (userId, roleId) => {
+  const response = await fetch(`${BASE_URL}/auth/users/${userId}/roles/${roleId}`, {
+    method: 'DELETE',
+    headers: getAuthHeader(),
+  });
+
+  return handleResponse(response);
+};
+
+// ============================================
+// User-Permission Assignment Endpoints
+// ============================================
+
+/**
+ * Get user permissions
+ * @param {string} userId - User ID
+ * @returns {Promise<Object>} User permissions
+ */
+export const getUserPermissions = async (userId) => {
+  const response = await fetch(`${BASE_URL}/auth/users/${userId}/permissions`, {
+    headers: getAuthHeader(),
+  });
+
+  return handleResponse(response);
+};
+
+/**
+ * Assign permission to user
+ * @param {string} userId - User ID
+ * @param {string} permissionId - Permission ID
+ * @returns {Promise<Object>} Success response
+ */
+export const assignPermissionToUser = async (userId, permissionId) => {
+  const response = await fetch(`${BASE_URL}/auth/users/${userId}/permissions`, {
+    method: 'POST',
+    headers: getAuthHeader(),
+    body: JSON.stringify({ permission_id: permissionId }),
+  });
+
+  return handleResponse(response);
+};
+
+/**
+ * Remove permission from user
+ * @param {string} userId - User ID
+ * @param {string} permissionId - Permission ID
+ * @returns {Promise<Object>} Success response
+ */
+export const removePermissionFromUser = async (userId, permissionId) => {
+  const response = await fetch(`${BASE_URL}/auth/users/${userId}/permissions/${permissionId}`, {
+    method: 'DELETE',
+    headers: getAuthHeader(),
+  });
+
+  return handleResponse(response);
+};
+
+// ============================================
+// Cache Management Endpoints
+// ============================================
+
+/**
+ * Clear permission cache
+ * @returns {Promise<Object>} Success response
+ */
+export const clearCache = async () => {
+  const response = await fetch(`${BASE_URL}/auth/cache/clear`, {
+    method: 'POST',
+    headers: getAuthHeader(),
+  });
+
+  return handleResponse(response);
+};
+
+/**
+ * Get cache statistics
+ * @returns {Promise<Object>} Cache stats
+ */
+export const getCacheStats = async () => {
+  const response = await fetch(`${BASE_URL}/auth/cache/stats`, {
+    headers: getAuthHeader(),
+  });
+
+  return handleResponse(response);
+};
+
+// Export all functions
+export default {
+  // Auth
+  login,
+  register,
+  getCurrentUser,
+  changePassword,
+  logout,
+
+  // User Management
+  getUsers,
+  getUserById,
+  createUser,
+  updateUser,
+  deleteUser,
+  changeUserPassword,
+  activateUser,
+  deactivateUser,
+
+  // Role Management
+  getRoles,
+  getRoleByName,
+  createRole,
+  getUsersInRole,
+  getRolePermissions,
+  assignPermissionToRole,
+  removePermissionFromRole,
+
+  // Permission Management
+  getPermissions,
+  createPermission,
+  checkPermission,
+
+  // User-Role Assignment
+  getUserRoles,
+  assignRoleToUser,
+  removeRoleFromUser,
+
+  // User-Permission Assignment
+  getUserPermissions,
+  assignPermissionToUser,
+  removePermissionFromUser,
+
+  // Cache Management
+  clearCache,
+  getCacheStats,
+};

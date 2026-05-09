@@ -1,0 +1,340 @@
+Generating random hostid in /etc/hostid: 7443f6c5
+Startup command: exec "Orthanc /tmp/orthanc.json"
+W1022 15:21:00.602858             MAIN main.cpp:2128] Orthanc version: 1.12.9
+W1022 15:21:00.603055             MAIN OrthancConfiguration.cpp:59] Reading the configuration from: "/tmp/orthanc.json"
+W1022 15:21:00.635942             MAIN main.cpp:952] Loading plugin(s) from: /run/orthanc/plugins
+W1022 15:21:00.636041             MAIN PluginsManager.cpp:259] Inexistent path to plugins: /run/orthanc/plugins
+W1022 15:21:00.636052             MAIN main.cpp:952] Loading plugin(s) from: /usr/share/orthanc/plugins
+W1022 15:21:00.642141             MAIN PluginsManager.cpp:287] Registering plugin 'dicom-web' (version 1.21)
+W1022 15:21:00.643989             MAIN dicom-web:/Plugin.cpp:635] URI to the DICOMweb REST API: /dicom-web/
+W1022 15:21:00.645933             MAIN dicom-web:/Plugin.cpp:748] DICOMweb public root: /dicom-web/
+W1022 15:21:00.645971             MAIN dicom-web:/Plugin.cpp:750] The DICOMWeb plugin will use 1 threads to load DICOM files for WADO-RS queries
+W1022 15:21:00.645979             MAIN dicom-web:/Plugin.cpp:761] URI to the WADO-URI API: /wado
+W1022 15:21:00.679591             MAIN PluginsManager.cpp:287] Registering plugin 'gdcm' (version 1.8)
+W1022 15:21:00.680498             MAIN PluginsManager.cpp:158] Gdcm.RestrictTransferSyntaxes configuration is set and not empty, Orthanc will use GDCM to transcode SOME transfer syntaxes:
+W1022 15:21:00.680588             MAIN PluginsManager.cpp:158] Orthanc will use GDCM to decode transfer syntax: 1.2.840.10008.1.2.4.90
+W1022 15:21:00.680647             MAIN PluginsManager.cpp:158] Orthanc will use GDCM to decode transfer syntax: 1.2.840.10008.1.2.4.91
+W1022 15:21:00.680717             MAIN PluginsManager.cpp:158] Orthanc will use GDCM to decode transfer syntax: 1.2.840.10008.1.2.4.92
+W1022 15:21:00.680765             MAIN PluginsManager.cpp:158] Orthanc will use GDCM to decode transfer syntax: 1.2.840.10008.1.2.4.93
+W1022 15:21:00.680823             MAIN PluginsManager.cpp:158] Throttling GDCM to 4 concurrent thread(s)
+W1022 15:21:00.681706             MAIN PluginsManager.cpp:158] Version of GDCM: 3.0.24
+W1022 15:21:00.693114             MAIN PluginsManager.cpp:287] Registering plugin 'postgresql-index' (version 9.0)
+W1022 15:21:00.695134             MAIN postgresql-index:/PostgreSQLParameters.cpp:110] PostgreSQL: using READ COMMITTED transaction mode
+W1022 15:21:00.696129             MAIN postgresql-index:/IndexBackend.cpp:3034] The index plugin will use 50 connection(s) to the database, and will retry up to 10 time(s) in the case of a collision
+W1022 15:21:00.699449             MAIN PluginsManager.cpp:287] Registering plugin 'postgresql-storage' (version 9.0)
+W1022 15:21:00.700573             MAIN postgresql-storage:/PostgreSQLParameters.cpp:110] PostgreSQL: using READ COMMITTED transaction mode
+W1022 15:21:00.725851             MAIN postgresql-storage:/StorageBackend.cpp:698] The storage area plugin will retry up to 10 time(s) in the case of a collision
+W1022 15:21:00.727304             MAIN PluginsManager.cpp:287] Registering plugin 'worklists' (version 1.12.9)
+W1022 15:21:00.727333             MAIN worklists:/Plugin.cpp:229] Sample worklist plugin is initializing
+W1022 15:21:00.727619             MAIN worklists:/Plugin.cpp:242] The database of worklists will be read from folder: /worklists
+W1022 15:21:00.731743             MAIN PluginsManager.cpp:287] Registering plugin 'orthanc-explorer-2' (version 1.9.4)
+W1022 15:21:00.733040             MAIN PluginsManager.cpp:158] Root URI to the Orthanc-Explorer 2 application: /ui/
+W1022 15:21:00.733877             MAIN main.cpp:1791] Using a custom database from plugins
+W1022 15:21:00.733906             MAIN main.cpp:1802] Using a custom storage area from plugins
+W1022 15:21:00.754165             MAIN postgresql-index:/PostgreSQLIndex.cpp:142] The database schema already exists, checking if it needs to be updated
+W1022 15:21:00.756049             MAIN postgresql-index:/PostgreSQLIndex.cpp:157] Current Database revision is 6
+W1022 15:21:01.443654             MAIN main.cpp:1757] The DB latency is 182 µs
+W1022 15:21:01.443725             MAIN HttpClient.cpp:1211] The verification of the peers in HTTPS requests is disabled
+W1022 15:21:01.444333             MAIN LuaContext.cpp:95] Lua says: Lua toolbox installed
+E1022 15:21:01.445176             MAIN OrthancException.cpp:62] The specified path does not point to a regular file: The path does not point to a regular file: /lua/hooks.lua
+E1022 15:21:01.445371             MAIN ServerIndex.cpp:369] INTERNAL ERROR: ServerIndex::Stop() should be invoked manually to avoid mess in the destruction order!
+W1022 15:21:01.948456             MAIN PluginsManager.cpp:224] Unregistering plugin 'dicom-web' (version 1.21)
+W1022 15:21:01.948628             MAIN PluginsManager.cpp:224] Unregistering plugin 'gdcm' (version 1.8)
+W1022 15:21:01.953001             MAIN PluginsManager.cpp:224] Unregistering plugin 'orthanc-explorer-2' (version 1.9.4)
+W1022 15:21:01.954512             MAIN PluginsManager.cpp:224] Unregistering plugin 'postgresql-index' (version 9.0)
+W1022 15:21:01.954633             MAIN postgresql-index:/IndexPlugin.cpp:108] PostgreSQL index is finalizing
+W1022 15:21:01.954844             MAIN PluginsManager.cpp:224] Unregistering plugin 'postgresql-storage' (version 9.0)
+W1022 15:21:01.954970             MAIN postgresql-storage:/StoragePlugin.cpp:87] PostgreSQL storage area is finalizing
+W1022 15:21:01.955664             MAIN PluginsManager.cpp:224] Unregistering plugin 'worklists' (version 1.12.9)
+W1022 15:21:01.956599             MAIN worklists:/Plugin.cpp:265] Sample worklist plugin is finalizing
+E1022 15:21:01.956700             MAIN main.cpp:2185] Uncaught exception, stopping now: [The specified path does not point to a regular file] (code 2006)
+W1022 15:21:01.956822             MAIN main.cpp:2216] Orthanc has stopped
+Startup command: exec "Orthanc /tmp/orthanc.json"
+W1022 15:21:02.379601             MAIN main.cpp:2128] Orthanc version: 1.12.9
+W1022 15:21:02.379813             MAIN OrthancConfiguration.cpp:59] Reading the configuration from: "/tmp/orthanc.json"
+W1022 15:21:02.413056             MAIN main.cpp:952] Loading plugin(s) from: /run/orthanc/plugins
+W1022 15:21:02.413114             MAIN PluginsManager.cpp:259] Inexistent path to plugins: /run/orthanc/plugins
+W1022 15:21:02.413128             MAIN main.cpp:952] Loading plugin(s) from: /usr/share/orthanc/plugins
+W1022 15:21:02.414041             MAIN PluginsManager.cpp:287] Registering plugin 'dicom-web' (version 1.21)
+W1022 15:21:02.414505             MAIN dicom-web:/Plugin.cpp:635] URI to the DICOMweb REST API: /dicom-web/
+W1022 15:21:02.414930             MAIN dicom-web:/Plugin.cpp:748] DICOMweb public root: /dicom-web/
+W1022 15:21:02.414959             MAIN dicom-web:/Plugin.cpp:750] The DICOMWeb plugin will use 1 threads to load DICOM files for WADO-RS queries
+W1022 15:21:02.414971             MAIN dicom-web:/Plugin.cpp:761] URI to the WADO-URI API: /wado
+W1022 15:21:02.431305             MAIN PluginsManager.cpp:287] Registering plugin 'gdcm' (version 1.8)
+W1022 15:21:02.431616             MAIN PluginsManager.cpp:158] Gdcm.RestrictTransferSyntaxes configuration is set and not empty, Orthanc will use GDCM to transcode SOME transfer syntaxes:
+W1022 15:21:02.431640             MAIN PluginsManager.cpp:158] Orthanc will use GDCM to decode transfer syntax: 1.2.840.10008.1.2.4.90
+W1022 15:21:02.431649             MAIN PluginsManager.cpp:158] Orthanc will use GDCM to decode transfer syntax: 1.2.840.10008.1.2.4.91
+W1022 15:21:02.431658             MAIN PluginsManager.cpp:158] Orthanc will use GDCM to decode transfer syntax: 1.2.840.10008.1.2.4.92
+W1022 15:21:02.431667             MAIN PluginsManager.cpp:158] Orthanc will use GDCM to decode transfer syntax: 1.2.840.10008.1.2.4.93
+W1022 15:21:02.431677             MAIN PluginsManager.cpp:158] Throttling GDCM to 4 concurrent thread(s)
+W1022 15:21:02.431708             MAIN PluginsManager.cpp:158] Version of GDCM: 3.0.24
+W1022 15:21:02.439432             MAIN PluginsManager.cpp:287] Registering plugin 'postgresql-index' (version 9.0)
+W1022 15:21:02.439957             MAIN postgresql-index:/PostgreSQLParameters.cpp:110] PostgreSQL: using READ COMMITTED transaction mode
+W1022 15:21:02.439991             MAIN postgresql-index:/IndexBackend.cpp:3034] The index plugin will use 50 connection(s) to the database, and will retry up to 10 time(s) in the case of a collision
+W1022 15:21:02.440539             MAIN PluginsManager.cpp:287] Registering plugin 'postgresql-storage' (version 9.0)
+W1022 15:21:02.440999             MAIN postgresql-storage:/PostgreSQLParameters.cpp:110] PostgreSQL: using READ COMMITTED transaction mode
+W1022 15:21:02.462310             MAIN postgresql-storage:/StorageBackend.cpp:698] The storage area plugin will retry up to 10 time(s) in the case of a collision
+W1022 15:21:02.462703             MAIN PluginsManager.cpp:287] Registering plugin 'worklists' (version 1.12.9)
+W1022 15:21:02.462728             MAIN worklists:/Plugin.cpp:229] Sample worklist plugin is initializing
+W1022 15:21:02.463000             MAIN worklists:/Plugin.cpp:242] The database of worklists will be read from folder: /worklists
+W1022 15:21:02.463396             MAIN PluginsManager.cpp:287] Registering plugin 'orthanc-explorer-2' (version 1.9.4)
+W1022 15:21:02.463829             MAIN PluginsManager.cpp:158] Root URI to the Orthanc-Explorer 2 application: /ui/
+W1022 15:21:02.463980             MAIN main.cpp:1791] Using a custom database from plugins
+W1022 15:21:02.463996             MAIN main.cpp:1802] Using a custom storage area from plugins
+W1022 15:21:02.480814             MAIN postgresql-index:/PostgreSQLIndex.cpp:142] The database schema already exists, checking if it needs to be updated
+W1022 15:21:02.481951             MAIN postgresql-index:/PostgreSQLIndex.cpp:157] Current Database revision is 6
+W1022 15:21:03.096430             MAIN main.cpp:1757] The DB latency is 166 µs
+W1022 15:21:03.096480             MAIN HttpClient.cpp:1211] The verification of the peers in HTTPS requests is disabled
+W1022 15:21:03.097011             MAIN LuaContext.cpp:95] Lua says: Lua toolbox installed
+E1022 15:21:03.097108             MAIN OrthancException.cpp:62] The specified path does not point to a regular file: The path does not point to a regular file: /lua/hooks.lua
+E1022 15:21:03.097263             MAIN ServerIndex.cpp:369] INTERNAL ERROR: ServerIndex::Stop() should be invoked manually to avoid mess in the destruction order!
+W1022 15:21:03.600432             MAIN PluginsManager.cpp:224] Unregistering plugin 'dicom-web' (version 1.21)
+W1022 15:21:03.600612             MAIN PluginsManager.cpp:224] Unregistering plugin 'gdcm' (version 1.8)
+W1022 15:21:03.606785             MAIN PluginsManager.cpp:224] Unregistering plugin 'orthanc-explorer-2' (version 1.9.4)
+W1022 15:21:03.606934             MAIN PluginsManager.cpp:224] Unregistering plugin 'postgresql-index' (version 9.0)
+W1022 15:21:03.606960             MAIN postgresql-index:/IndexPlugin.cpp:108] PostgreSQL index is finalizing
+W1022 15:21:03.607075             MAIN PluginsManager.cpp:224] Unregistering plugin 'postgresql-storage' (version 9.0)
+W1022 15:21:03.607099             MAIN postgresql-storage:/StoragePlugin.cpp:87] PostgreSQL storage area is finalizing
+W1022 15:21:03.607810             MAIN PluginsManager.cpp:224] Unregistering plugin 'worklists' (version 1.12.9)
+W1022 15:21:03.607837             MAIN worklists:/Plugin.cpp:265] Sample worklist plugin is finalizing
+E1022 15:21:03.607884             MAIN main.cpp:2185] Uncaught exception, stopping now: [The specified path does not point to a regular file] (code 2006)
+W1022 15:21:03.607925             MAIN main.cpp:2216] Orthanc has stopped
+Startup command: exec "Orthanc /tmp/orthanc.json"
+W1022 15:21:04.050812             MAIN main.cpp:2128] Orthanc version: 1.12.9
+W1022 15:21:04.050983             MAIN OrthancConfiguration.cpp:59] Reading the configuration from: "/tmp/orthanc.json"
+W1022 15:21:04.078701             MAIN main.cpp:952] Loading plugin(s) from: /run/orthanc/plugins
+W1022 15:21:04.078731             MAIN PluginsManager.cpp:259] Inexistent path to plugins: /run/orthanc/plugins
+W1022 15:21:04.078739             MAIN main.cpp:952] Loading plugin(s) from: /usr/share/orthanc/plugins
+W1022 15:21:04.079233             MAIN PluginsManager.cpp:287] Registering plugin 'dicom-web' (version 1.21)
+W1022 15:21:04.079512             MAIN dicom-web:/Plugin.cpp:635] URI to the DICOMweb REST API: /dicom-web/
+W1022 15:21:04.079763             MAIN dicom-web:/Plugin.cpp:748] DICOMweb public root: /dicom-web/
+W1022 15:21:04.079783             MAIN dicom-web:/Plugin.cpp:750] The DICOMWeb plugin will use 1 threads to load DICOM files for WADO-RS queries
+W1022 15:21:04.079790             MAIN dicom-web:/Plugin.cpp:761] URI to the WADO-URI API: /wado
+W1022 15:21:04.090522             MAIN PluginsManager.cpp:287] Registering plugin 'gdcm' (version 1.8)
+W1022 15:21:04.090818             MAIN PluginsManager.cpp:158] Gdcm.RestrictTransferSyntaxes configuration is set and not empty, Orthanc will use GDCM to transcode SOME transfer syntaxes:
+W1022 15:21:04.090836             MAIN PluginsManager.cpp:158] Orthanc will use GDCM to decode transfer syntax: 1.2.840.10008.1.2.4.90
+W1022 15:21:04.090841             MAIN PluginsManager.cpp:158] Orthanc will use GDCM to decode transfer syntax: 1.2.840.10008.1.2.4.91
+W1022 15:21:04.090846             MAIN PluginsManager.cpp:158] Orthanc will use GDCM to decode transfer syntax: 1.2.840.10008.1.2.4.92
+W1022 15:21:04.090851             MAIN PluginsManager.cpp:158] Orthanc will use GDCM to decode transfer syntax: 1.2.840.10008.1.2.4.93
+W1022 15:21:04.090857             MAIN PluginsManager.cpp:158] Throttling GDCM to 4 concurrent thread(s)
+W1022 15:21:04.090869             MAIN PluginsManager.cpp:158] Version of GDCM: 3.0.24
+W1022 15:21:04.096560             MAIN PluginsManager.cpp:287] Registering plugin 'postgresql-index' (version 9.0)
+W1022 15:21:04.096859             MAIN postgresql-index:/PostgreSQLParameters.cpp:110] PostgreSQL: using READ COMMITTED transaction mode
+W1022 15:21:04.096884             MAIN postgresql-index:/IndexBackend.cpp:3034] The index plugin will use 50 connection(s) to the database, and will retry up to 10 time(s) in the case of a collision
+W1022 15:21:04.097289             MAIN PluginsManager.cpp:287] Registering plugin 'postgresql-storage' (version 9.0)
+W1022 15:21:04.097600             MAIN postgresql-storage:/PostgreSQLParameters.cpp:110] PostgreSQL: using READ COMMITTED transaction mode
+W1022 15:21:04.117913             MAIN postgresql-storage:/StorageBackend.cpp:698] The storage area plugin will retry up to 10 time(s) in the case of a collision
+W1022 15:21:04.118273             MAIN PluginsManager.cpp:287] Registering plugin 'worklists' (version 1.12.9)
+W1022 15:21:04.118299             MAIN worklists:/Plugin.cpp:229] Sample worklist plugin is initializing
+W1022 15:21:04.118551             MAIN worklists:/Plugin.cpp:242] The database of worklists will be read from folder: /worklists
+W1022 15:21:04.118965             MAIN PluginsManager.cpp:287] Registering plugin 'orthanc-explorer-2' (version 1.9.4)
+W1022 15:21:04.119354             MAIN PluginsManager.cpp:158] Root URI to the Orthanc-Explorer 2 application: /ui/
+W1022 15:21:04.119487             MAIN main.cpp:1791] Using a custom database from plugins
+W1022 15:21:04.119514             MAIN main.cpp:1802] Using a custom storage area from plugins
+W1022 15:21:04.136011             MAIN postgresql-index:/PostgreSQLIndex.cpp:142] The database schema already exists, checking if it needs to be updated
+W1022 15:21:04.136967             MAIN postgresql-index:/PostgreSQLIndex.cpp:157] Current Database revision is 6
+W1022 15:21:04.735140             MAIN main.cpp:1757] The DB latency is 154 µs
+W1022 15:21:04.735188             MAIN HttpClient.cpp:1211] The verification of the peers in HTTPS requests is disabled
+W1022 15:21:04.735668             MAIN LuaContext.cpp:95] Lua says: Lua toolbox installed
+E1022 15:21:04.735774             MAIN OrthancException.cpp:62] The specified path does not point to a regular file: The path does not point to a regular file: /lua/hooks.lua
+E1022 15:21:04.735945             MAIN ServerIndex.cpp:369] INTERNAL ERROR: ServerIndex::Stop() should be invoked manually to avoid mess in the destruction order!
+W1022 15:21:05.238744             MAIN PluginsManager.cpp:224] Unregistering plugin 'dicom-web' (version 1.21)
+W1022 15:21:05.238912             MAIN PluginsManager.cpp:224] Unregistering plugin 'gdcm' (version 1.8)
+W1022 15:21:05.243390             MAIN PluginsManager.cpp:224] Unregistering plugin 'orthanc-explorer-2' (version 1.9.4)
+W1022 15:21:05.243532             MAIN PluginsManager.cpp:224] Unregistering plugin 'postgresql-index' (version 9.0)
+W1022 15:21:05.243551             MAIN postgresql-index:/IndexPlugin.cpp:108] PostgreSQL index is finalizing
+W1022 15:21:05.243658             MAIN PluginsManager.cpp:224] Unregistering plugin 'postgresql-storage' (version 9.0)
+W1022 15:21:05.243676             MAIN postgresql-storage:/StoragePlugin.cpp:87] PostgreSQL storage area is finalizing
+W1022 15:21:05.244338             MAIN PluginsManager.cpp:224] Unregistering plugin 'worklists' (version 1.12.9)
+W1022 15:21:05.244365             MAIN worklists:/Plugin.cpp:265] Sample worklist plugin is finalizing
+E1022 15:21:05.244425             MAIN main.cpp:2185] Uncaught exception, stopping now: [The specified path does not point to a regular file] (code 2006)
+W1022 15:21:05.244456             MAIN main.cpp:2216] Orthanc has stopped
+Startup command: exec "Orthanc /tmp/orthanc.json"
+W1022 15:21:05.881712             MAIN main.cpp:2128] Orthanc version: 1.12.9
+W1022 15:21:05.881871             MAIN OrthancConfiguration.cpp:59] Reading the configuration from: "/tmp/orthanc.json"
+W1022 15:21:05.908918             MAIN main.cpp:952] Loading plugin(s) from: /run/orthanc/plugins
+W1022 15:21:05.908945             MAIN PluginsManager.cpp:259] Inexistent path to plugins: /run/orthanc/plugins
+W1022 15:21:05.908953             MAIN main.cpp:952] Loading plugin(s) from: /usr/share/orthanc/plugins
+W1022 15:21:05.909404             MAIN PluginsManager.cpp:287] Registering plugin 'dicom-web' (version 1.21)
+W1022 15:21:05.909677             MAIN dicom-web:/Plugin.cpp:635] URI to the DICOMweb REST API: /dicom-web/
+W1022 15:21:05.909927             MAIN dicom-web:/Plugin.cpp:748] DICOMweb public root: /dicom-web/
+W1022 15:21:05.909946             MAIN dicom-web:/Plugin.cpp:750] The DICOMWeb plugin will use 1 threads to load DICOM files for WADO-RS queries
+W1022 15:21:05.909953             MAIN dicom-web:/Plugin.cpp:761] URI to the WADO-URI API: /wado
+W1022 15:21:05.922091             MAIN PluginsManager.cpp:287] Registering plugin 'gdcm' (version 1.8)
+W1022 15:21:05.922392             MAIN PluginsManager.cpp:158] Gdcm.RestrictTransferSyntaxes configuration is set and not empty, Orthanc will use GDCM to transcode SOME transfer syntaxes:
+W1022 15:21:05.922409             MAIN PluginsManager.cpp:158] Orthanc will use GDCM to decode transfer syntax: 1.2.840.10008.1.2.4.90
+W1022 15:21:05.922415             MAIN PluginsManager.cpp:158] Orthanc will use GDCM to decode transfer syntax: 1.2.840.10008.1.2.4.91
+W1022 15:21:05.922420             MAIN PluginsManager.cpp:158] Orthanc will use GDCM to decode transfer syntax: 1.2.840.10008.1.2.4.92
+W1022 15:21:05.922424             MAIN PluginsManager.cpp:158] Orthanc will use GDCM to decode transfer syntax: 1.2.840.10008.1.2.4.93
+W1022 15:21:05.922431             MAIN PluginsManager.cpp:158] Throttling GDCM to 4 concurrent thread(s)
+W1022 15:21:05.922441             MAIN PluginsManager.cpp:158] Version of GDCM: 3.0.24
+W1022 15:21:05.928258             MAIN PluginsManager.cpp:287] Registering plugin 'postgresql-index' (version 9.0)
+W1022 15:21:05.928535             MAIN postgresql-index:/PostgreSQLParameters.cpp:110] PostgreSQL: using READ COMMITTED transaction mode
+W1022 15:21:05.928558             MAIN postgresql-index:/IndexBackend.cpp:3034] The index plugin will use 50 connection(s) to the database, and will retry up to 10 time(s) in the case of a collision
+W1022 15:21:05.929011             MAIN PluginsManager.cpp:287] Registering plugin 'postgresql-storage' (version 9.0)
+W1022 15:21:05.929269             MAIN postgresql-storage:/PostgreSQLParameters.cpp:110] PostgreSQL: using READ COMMITTED transaction mode
+W1022 15:21:05.949796             MAIN postgresql-storage:/StorageBackend.cpp:698] The storage area plugin will retry up to 10 time(s) in the case of a collision
+W1022 15:21:05.950068             MAIN PluginsManager.cpp:287] Registering plugin 'worklists' (version 1.12.9)
+W1022 15:21:05.950093             MAIN worklists:/Plugin.cpp:229] Sample worklist plugin is initializing
+W1022 15:21:05.950329             MAIN worklists:/Plugin.cpp:242] The database of worklists will be read from folder: /worklists
+W1022 15:21:05.950695             MAIN PluginsManager.cpp:287] Registering plugin 'orthanc-explorer-2' (version 1.9.4)
+W1022 15:21:05.951154             MAIN PluginsManager.cpp:158] Root URI to the Orthanc-Explorer 2 application: /ui/
+W1022 15:21:05.951286             MAIN main.cpp:1791] Using a custom database from plugins
+W1022 15:21:05.951301             MAIN main.cpp:1802] Using a custom storage area from plugins
+W1022 15:21:05.972169             MAIN postgresql-index:/PostgreSQLIndex.cpp:142] The database schema already exists, checking if it needs to be updated
+W1022 15:21:05.973479             MAIN postgresql-index:/PostgreSQLIndex.cpp:157] Current Database revision is 6
+W1022 15:21:06.623191             MAIN main.cpp:1757] The DB latency is 187 µs
+W1022 15:21:06.623256             MAIN HttpClient.cpp:1211] The verification of the peers in HTTPS requests is disabled
+W1022 15:21:06.623762             MAIN LuaContext.cpp:95] Lua says: Lua toolbox installed
+E1022 15:21:06.623855             MAIN OrthancException.cpp:62] The specified path does not point to a regular file: The path does not point to a regular file: /lua/hooks.lua
+E1022 15:21:06.624012             MAIN ServerIndex.cpp:369] INTERNAL ERROR: ServerIndex::Stop() should be invoked manually to avoid mess in the destruction order!
+W1022 15:21:07.127773             MAIN PluginsManager.cpp:224] Unregistering plugin 'dicom-web' (version 1.21)
+W1022 15:21:07.127957             MAIN PluginsManager.cpp:224] Unregistering plugin 'gdcm' (version 1.8)
+W1022 15:21:07.138333             MAIN PluginsManager.cpp:224] Unregistering plugin 'orthanc-explorer-2' (version 1.9.4)
+W1022 15:21:07.142847             MAIN PluginsManager.cpp:224] Unregistering plugin 'postgresql-index' (version 9.0)
+W1022 15:21:07.142872             MAIN postgresql-index:/IndexPlugin.cpp:108] PostgreSQL index is finalizing
+W1022 15:21:07.142993             MAIN PluginsManager.cpp:224] Unregistering plugin 'postgresql-storage' (version 9.0)
+W1022 15:21:07.143013             MAIN postgresql-storage:/StoragePlugin.cpp:87] PostgreSQL storage area is finalizing
+W1022 15:21:07.143636             MAIN PluginsManager.cpp:224] Unregistering plugin 'worklists' (version 1.12.9)
+W1022 15:21:07.143657             MAIN worklists:/Plugin.cpp:265] Sample worklist plugin is finalizing
+E1022 15:21:07.143716             MAIN main.cpp:2185] Uncaught exception, stopping now: [The specified path does not point to a regular file] (code 2006)
+W1022 15:21:07.143745             MAIN main.cpp:2216] Orthanc has stopped
+Startup command: exec "Orthanc /tmp/orthanc.json"
+W1022 15:21:08.198258             MAIN main.cpp:2128] Orthanc version: 1.12.9
+W1022 15:21:08.198417             MAIN OrthancConfiguration.cpp:59] Reading the configuration from: "/tmp/orthanc.json"
+W1022 15:21:08.225829             MAIN main.cpp:952] Loading plugin(s) from: /run/orthanc/plugins
+W1022 15:21:08.225858             MAIN PluginsManager.cpp:259] Inexistent path to plugins: /run/orthanc/plugins
+W1022 15:21:08.225866             MAIN main.cpp:952] Loading plugin(s) from: /usr/share/orthanc/plugins
+W1022 15:21:08.226314             MAIN PluginsManager.cpp:287] Registering plugin 'dicom-web' (version 1.21)
+W1022 15:21:08.226608             MAIN dicom-web:/Plugin.cpp:635] URI to the DICOMweb REST API: /dicom-web/
+W1022 15:21:08.226874             MAIN dicom-web:/Plugin.cpp:748] DICOMweb public root: /dicom-web/
+W1022 15:21:08.226904             MAIN dicom-web:/Plugin.cpp:750] The DICOMWeb plugin will use 1 threads to load DICOM files for WADO-RS queries
+W1022 15:21:08.226911             MAIN dicom-web:/Plugin.cpp:761] URI to the WADO-URI API: /wado
+W1022 15:21:08.237620             MAIN PluginsManager.cpp:287] Registering plugin 'gdcm' (version 1.8)
+W1022 15:21:08.237937             MAIN PluginsManager.cpp:158] Gdcm.RestrictTransferSyntaxes configuration is set and not empty, Orthanc will use GDCM to transcode SOME transfer syntaxes:
+W1022 15:21:08.237955             MAIN PluginsManager.cpp:158] Orthanc will use GDCM to decode transfer syntax: 1.2.840.10008.1.2.4.90
+W1022 15:21:08.237961             MAIN PluginsManager.cpp:158] Orthanc will use GDCM to decode transfer syntax: 1.2.840.10008.1.2.4.91
+W1022 15:21:08.237965             MAIN PluginsManager.cpp:158] Orthanc will use GDCM to decode transfer syntax: 1.2.840.10008.1.2.4.92
+W1022 15:21:08.237970             MAIN PluginsManager.cpp:158] Orthanc will use GDCM to decode transfer syntax: 1.2.840.10008.1.2.4.93
+W1022 15:21:08.237976             MAIN PluginsManager.cpp:158] Throttling GDCM to 4 concurrent thread(s)
+W1022 15:21:08.237987             MAIN PluginsManager.cpp:158] Version of GDCM: 3.0.24
+W1022 15:21:08.243729             MAIN PluginsManager.cpp:287] Registering plugin 'postgresql-index' (version 9.0)
+W1022 15:21:08.244017             MAIN postgresql-index:/PostgreSQLParameters.cpp:110] PostgreSQL: using READ COMMITTED transaction mode
+W1022 15:21:08.244040             MAIN postgresql-index:/IndexBackend.cpp:3034] The index plugin will use 50 connection(s) to the database, and will retry up to 10 time(s) in the case of a collision
+W1022 15:21:08.244423             MAIN PluginsManager.cpp:287] Registering plugin 'postgresql-storage' (version 9.0)
+W1022 15:21:08.244679             MAIN postgresql-storage:/PostgreSQLParameters.cpp:110] PostgreSQL: using READ COMMITTED transaction mode
+W1022 15:21:08.264356             MAIN postgresql-storage:/StorageBackend.cpp:698] The storage area plugin will retry up to 10 time(s) in the case of a collision
+W1022 15:21:08.264587             MAIN PluginsManager.cpp:287] Registering plugin 'worklists' (version 1.12.9)
+W1022 15:21:08.264611             MAIN worklists:/Plugin.cpp:229] Sample worklist plugin is initializing
+W1022 15:21:08.264860             MAIN worklists:/Plugin.cpp:242] The database of worklists will be read from folder: /worklists
+W1022 15:21:08.265207             MAIN PluginsManager.cpp:287] Registering plugin 'orthanc-explorer-2' (version 1.9.4)
+W1022 15:21:08.265623             MAIN PluginsManager.cpp:158] Root URI to the Orthanc-Explorer 2 application: /ui/
+W1022 15:21:08.265761             MAIN main.cpp:1791] Using a custom database from plugins
+W1022 15:21:08.265776             MAIN main.cpp:1802] Using a custom storage area from plugins
+W1022 15:21:08.282479             MAIN postgresql-index:/PostgreSQLIndex.cpp:142] The database schema already exists, checking if it needs to be updated
+W1022 15:21:08.283587             MAIN postgresql-index:/PostgreSQLIndex.cpp:157] Current Database revision is 6
+W1022 15:21:08.897379             MAIN main.cpp:1757] The DB latency is 163 µs
+W1022 15:21:08.897423             MAIN HttpClient.cpp:1211] The verification of the peers in HTTPS requests is disabled
+W1022 15:21:08.897926             MAIN LuaContext.cpp:95] Lua says: Lua toolbox installed
+E1022 15:21:08.898009             MAIN OrthancException.cpp:62] The specified path does not point to a regular file: The path does not point to a regular file: /lua/hooks.lua
+E1022 15:21:08.898242             MAIN ServerIndex.cpp:369] INTERNAL ERROR: ServerIndex::Stop() should be invoked manually to avoid mess in the destruction order!
+W1022 15:21:09.401955             MAIN PluginsManager.cpp:224] Unregistering plugin 'dicom-web' (version 1.21)
+W1022 15:21:09.402131             MAIN PluginsManager.cpp:224] Unregistering plugin 'gdcm' (version 1.8)
+W1022 15:21:09.410138             MAIN PluginsManager.cpp:224] Unregistering plugin 'orthanc-explorer-2' (version 1.9.4)
+W1022 15:21:09.411857             MAIN PluginsManager.cpp:224] Unregistering plugin 'postgresql-index' (version 9.0)
+W1022 15:21:09.411881             MAIN postgresql-index:/IndexPlugin.cpp:108] PostgreSQL index is finalizing
+W1022 15:21:09.412001             MAIN PluginsManager.cpp:224] Unregistering plugin 'postgresql-storage' (version 9.0)
+W1022 15:21:09.412021             MAIN postgresql-storage:/StoragePlugin.cpp:87] PostgreSQL storage area is finalizing
+W1022 15:21:09.412647             MAIN PluginsManager.cpp:224] Unregistering plugin 'worklists' (version 1.12.9)
+W1022 15:21:09.412667             MAIN worklists:/Plugin.cpp:265] Sample worklist plugin is finalizing
+E1022 15:21:09.412769             MAIN main.cpp:2185] Uncaught exception, stopping now: [The specified path does not point to a regular file] (code 2006)
+W1022 15:21:09.412970             MAIN main.cpp:2216] Orthanc has stopped
+Startup command: exec "Orthanc /tmp/orthanc.json"
+W1022 15:21:11.266380             MAIN main.cpp:2128] Orthanc version: 1.12.9
+W1022 15:21:11.266542             MAIN OrthancConfiguration.cpp:59] Reading the configuration from: "/tmp/orthanc.json"
+W1022 15:21:11.304523             MAIN main.cpp:952] Loading plugin(s) from: /run/orthanc/plugins
+W1022 15:21:11.304576             MAIN PluginsManager.cpp:259] Inexistent path to plugins: /run/orthanc/plugins
+W1022 15:21:11.304596             MAIN main.cpp:952] Loading plugin(s) from: /usr/share/orthanc/plugins
+W1022 15:21:11.305354             MAIN PluginsManager.cpp:287] Registering plugin 'dicom-web' (version 1.21)
+W1022 15:21:11.305711             MAIN dicom-web:/Plugin.cpp:635] URI to the DICOMweb REST API: /dicom-web/
+W1022 15:21:11.305973             MAIN dicom-web:/Plugin.cpp:748] DICOMweb public root: /dicom-web/
+W1022 15:21:11.305992             MAIN dicom-web:/Plugin.cpp:750] The DICOMWeb plugin will use 1 threads to load DICOM files for WADO-RS queries
+W1022 15:21:11.305999             MAIN dicom-web:/Plugin.cpp:761] URI to the WADO-URI API: /wado
+W1022 15:21:11.317010             MAIN PluginsManager.cpp:287] Registering plugin 'gdcm' (version 1.8)
+W1022 15:21:11.317287             MAIN PluginsManager.cpp:158] Gdcm.RestrictTransferSyntaxes configuration is set and not empty, Orthanc will use GDCM to transcode SOME transfer syntaxes:
+W1022 15:21:11.317303             MAIN PluginsManager.cpp:158] Orthanc will use GDCM to decode transfer syntax: 1.2.840.10008.1.2.4.90
+W1022 15:21:11.317308             MAIN PluginsManager.cpp:158] Orthanc will use GDCM to decode transfer syntax: 1.2.840.10008.1.2.4.91
+W1022 15:21:11.317313             MAIN PluginsManager.cpp:158] Orthanc will use GDCM to decode transfer syntax: 1.2.840.10008.1.2.4.92
+W1022 15:21:11.317317             MAIN PluginsManager.cpp:158] Orthanc will use GDCM to decode transfer syntax: 1.2.840.10008.1.2.4.93
+W1022 15:21:11.317323             MAIN PluginsManager.cpp:158] Throttling GDCM to 4 concurrent thread(s)
+W1022 15:21:11.317333             MAIN PluginsManager.cpp:158] Version of GDCM: 3.0.24
+W1022 15:21:11.323222             MAIN PluginsManager.cpp:287] Registering plugin 'postgresql-index' (version 9.0)
+W1022 15:21:11.323506             MAIN postgresql-index:/PostgreSQLParameters.cpp:110] PostgreSQL: using READ COMMITTED transaction mode
+W1022 15:21:11.323528             MAIN postgresql-index:/IndexBackend.cpp:3034] The index plugin will use 50 connection(s) to the database, and will retry up to 10 time(s) in the case of a collision
+W1022 15:21:11.323945             MAIN PluginsManager.cpp:287] Registering plugin 'postgresql-storage' (version 9.0)
+W1022 15:21:11.324203             MAIN postgresql-storage:/PostgreSQLParameters.cpp:110] PostgreSQL: using READ COMMITTED transaction mode
+W1022 15:21:11.344301             MAIN postgresql-storage:/StorageBackend.cpp:698] The storage area plugin will retry up to 10 time(s) in the case of a collision
+W1022 15:21:11.344643             MAIN PluginsManager.cpp:287] Registering plugin 'worklists' (version 1.12.9)
+W1022 15:21:11.344668             MAIN worklists:/Plugin.cpp:229] Sample worklist plugin is initializing
+W1022 15:21:11.344946             MAIN worklists:/Plugin.cpp:242] The database of worklists will be read from folder: /worklists
+W1022 15:21:11.345335             MAIN PluginsManager.cpp:287] Registering plugin 'orthanc-explorer-2' (version 1.9.4)
+W1022 15:21:11.345743             MAIN PluginsManager.cpp:158] Root URI to the Orthanc-Explorer 2 application: /ui/
+W1022 15:21:11.345878             MAIN main.cpp:1791] Using a custom database from plugins
+W1022 15:21:11.345902             MAIN main.cpp:1802] Using a custom storage area from plugins
+W1022 15:21:11.361603             MAIN postgresql-index:/PostgreSQLIndex.cpp:142] The database schema already exists, checking if it needs to be updated
+W1022 15:21:11.362699             MAIN postgresql-index:/PostgreSQLIndex.cpp:157] Current Database revision is 6
+W1022 15:21:11.958950             MAIN main.cpp:1757] The DB latency is 153 µs
+W1022 15:21:11.958993             MAIN HttpClient.cpp:1211] The verification of the peers in HTTPS requests is disabled
+W1022 15:21:11.959537             MAIN LuaContext.cpp:95] Lua says: Lua toolbox installed
+E1022 15:21:11.959621             MAIN OrthancException.cpp:62] The specified path does not point to a regular file: The path does not point to a regular file: /lua/hooks.lua
+E1022 15:21:11.959788             MAIN ServerIndex.cpp:369] INTERNAL ERROR: ServerIndex::Stop() should be invoked manually to avoid mess in the destruction order!
+W1022 15:21:12.461980             MAIN PluginsManager.cpp:224] Unregistering plugin 'dicom-web' (version 1.21)
+W1022 15:21:12.462145             MAIN PluginsManager.cpp:224] Unregistering plugin 'gdcm' (version 1.8)
+W1022 15:21:12.468657             MAIN PluginsManager.cpp:224] Unregistering plugin 'orthanc-explorer-2' (version 1.9.4)
+W1022 15:21:12.471572             MAIN PluginsManager.cpp:224] Unregistering plugin 'postgresql-index' (version 9.0)
+W1022 15:21:12.471593             MAIN postgresql-index:/IndexPlugin.cpp:108] PostgreSQL index is finalizing
+W1022 15:21:12.471759             MAIN PluginsManager.cpp:224] Unregistering plugin 'postgresql-storage' (version 9.0)
+W1022 15:21:12.471780             MAIN postgresql-storage:/StoragePlugin.cpp:87] PostgreSQL storage area is finalizing
+W1022 15:21:12.472377             MAIN PluginsManager.cpp:224] Unregistering plugin 'worklists' (version 1.12.9)
+W1022 15:21:12.472397             MAIN worklists:/Plugin.cpp:265] Sample worklist plugin is finalizing
+E1022 15:21:12.472436             MAIN main.cpp:2185] Uncaught exception, stopping now: [The specified path does not point to a regular file] (code 2006)
+W1022 15:21:12.472461             MAIN main.cpp:2216] Orthanc has stopped
+Startup command: exec "Orthanc /tmp/orthanc.json"
+W1022 15:21:15.902830             MAIN main.cpp:2128] Orthanc version: 1.12.9
+W1022 15:21:15.903038             MAIN OrthancConfiguration.cpp:59] Reading the configuration from: "/tmp/orthanc.json"
+W1022 15:21:15.930630             MAIN main.cpp:952] Loading plugin(s) from: /run/orthanc/plugins
+W1022 15:21:15.930662             MAIN PluginsManager.cpp:259] Inexistent path to plugins: /run/orthanc/plugins
+W1022 15:21:15.930670             MAIN main.cpp:952] Loading plugin(s) from: /usr/share/orthanc/plugins
+W1022 15:21:15.931197             MAIN PluginsManager.cpp:287] Registering plugin 'dicom-web' (version 1.21)
+W1022 15:21:15.931466             MAIN dicom-web:/Plugin.cpp:635] URI to the DICOMweb REST API: /dicom-web/
+W1022 15:21:15.931707             MAIN dicom-web:/Plugin.cpp:748] DICOMweb public root: /dicom-web/
+W1022 15:21:15.931726             MAIN dicom-web:/Plugin.cpp:750] The DICOMWeb plugin will use 1 threads to load DICOM files for WADO-RS queries
+W1022 15:21:15.931732             MAIN dicom-web:/Plugin.cpp:761] URI to the WADO-URI API: /wado
+W1022 15:21:15.942899             MAIN PluginsManager.cpp:287] Registering plugin 'gdcm' (version 1.8)
+W1022 15:21:15.943183             MAIN PluginsManager.cpp:158] Gdcm.RestrictTransferSyntaxes configuration is set and not empty, Orthanc will use GDCM to transcode SOME transfer syntaxes:
+W1022 15:21:15.943199             MAIN PluginsManager.cpp:158] Orthanc will use GDCM to decode transfer syntax: 1.2.840.10008.1.2.4.90
+W1022 15:21:15.943204             MAIN PluginsManager.cpp:158] Orthanc will use GDCM to decode transfer syntax: 1.2.840.10008.1.2.4.91
+W1022 15:21:15.943209             MAIN PluginsManager.cpp:158] Orthanc will use GDCM to decode transfer syntax: 1.2.840.10008.1.2.4.92
+W1022 15:21:15.943213             MAIN PluginsManager.cpp:158] Orthanc will use GDCM to decode transfer syntax: 1.2.840.10008.1.2.4.93
+W1022 15:21:15.943220             MAIN PluginsManager.cpp:158] Throttling GDCM to 4 concurrent thread(s)
+W1022 15:21:15.943230             MAIN PluginsManager.cpp:158] Version of GDCM: 3.0.24
+W1022 15:21:15.949172             MAIN PluginsManager.cpp:287] Registering plugin 'postgresql-index' (version 9.0)
+W1022 15:21:15.949461             MAIN postgresql-index:/PostgreSQLParameters.cpp:110] PostgreSQL: using READ COMMITTED transaction mode
+W1022 15:21:15.949483             MAIN postgresql-index:/IndexBackend.cpp:3034] The index plugin will use 50 connection(s) to the database, and will retry up to 10 time(s) in the case of a collision
+W1022 15:21:15.949950             MAIN PluginsManager.cpp:287] Registering plugin 'postgresql-storage' (version 9.0)
+W1022 15:21:15.950244             MAIN postgresql-storage:/PostgreSQLParameters.cpp:110] PostgreSQL: using READ COMMITTED transaction mode
+W1022 15:21:15.972219             MAIN postgresql-storage:/StorageBackend.cpp:698] The storage area plugin will retry up to 10 time(s) in the case of a collision
+W1022 15:21:15.972554             MAIN PluginsManager.cpp:287] Registering plugin 'worklists' (version 1.12.9)
+W1022 15:21:15.972579             MAIN worklists:/Plugin.cpp:229] Sample worklist plugin is initializing
+W1022 15:21:15.972858             MAIN worklists:/Plugin.cpp:242] The database of worklists will be read from folder: /worklists
+W1022 15:21:15.973244             MAIN PluginsManager.cpp:287] Registering plugin 'orthanc-explorer-2' (version 1.9.4)
+W1022 15:21:15.973647             MAIN PluginsManager.cpp:158] Root URI to the Orthanc-Explorer 2 application: /ui/
+W1022 15:21:15.973808             MAIN main.cpp:1791] Using a custom database from plugins
+W1022 15:21:15.973825             MAIN main.cpp:1802] Using a custom storage area from plugins
+W1022 15:21:15.989836             MAIN postgresql-index:/PostgreSQLIndex.cpp:142] The database schema already exists, checking if it needs to be updated
+W1022 15:21:15.990877             MAIN postgresql-index:/PostgreSQLIndex.cpp:157] Current Database revision is 6
+W1022 15:21:16.627313             MAIN main.cpp:1757] The DB latency is 252 µs
+W1022 15:21:16.627366             MAIN HttpClient.cpp:1211] The verification of the peers in HTTPS requests is disabled
+W1022 15:21:16.627878             MAIN LuaContext.cpp:95] Lua says: Lua toolbox installed
+E1022 15:21:16.627979             MAIN OrthancException.cpp:62] The specified path does not point to a regular file: The path does not point to a regular file: /lua/hooks.lua
+E1022 15:21:16.628150             MAIN ServerIndex.cpp:369] INTERNAL ERROR: ServerIndex::Stop() should be invoked manually to avoid mess in the destruction order!

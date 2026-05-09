@@ -1,0 +1,264 @@
+import { useState, useEffect } from 'react'
+import { setCurrentUser } from '../services/rbac'
+import { useNavigate, useLocation } from 'react-router-dom'
+import { loginBackend } from '../services/authService'
+import { loadRegistry, saveRegistry } from '../services/api-registry'
+import { logger } from '../utils/logger'
+
+const rolePerms = {
+  admin: ['*','dashboard.view','worklist.view','order.view','order.create','audit.view','modality.manage','modality.view','node.manage','node.view','user.manage','user.view','patient.view','patient.create','patient.edit'],
+  technologist: ['dashboard.view','worklist.view','order.view','audit.view','modality.view','node.view','patient.view'],
+  clerk: ['dashboard.view','worklist.view','order.view','patient.view']
+}
+
+export default function Login(){
+  const [name, setName] = useState('Rani Technologist')
+  const [role, setRole] = useState('technologist')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [useBackend, setUseBackend] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const nav = useNavigate()
+  const location = useLocation()
+
+  // Check env configuration for local auth
+  const localAuthEnabled = import.meta.env.VITE_ENABLE_LOCAL_AUTH !== 'false'
+
+  // Check if backend auth is available
+  useEffect(() => {
+    const registry = loadRegistry()
+    const authEnabled = registry.auth?.enabled || false
+
+    // If local auth is disabled via env, force backend auth
+    if (!localAuthEnabled) {
+      setUseBackend(true)
+    } else {
+      setUseBackend(authEnabled)
+    }
+  }, [localAuthEnabled])
+
+  const submit = async (e) => {
+    e.preventDefault()
+    setLoading(true)
+    setError('')
+
+    const from = location.state?.from || '/dashboard'
+
+    try {
+      if (useBackend) {
+        // Backend authentication
+        if (!username.trim()) {
+          throw new Error('Username is required')
+        }
+
+        if (!password.trim()) {
+          throw new Error('Password is required')
+        }
+
+        // Validate username format (basic check)
+        if (username.length < 3) {
+          throw new Error('Username must be at least 3 characters')
+        }
+
+        const response = await loginBackend(username, password)
+        logger.info('Backend login successful:', response)
+
+        // Navigate after successful login
+        nav(from, { replace: true })
+      } else {
+        // Local authentication (mock) - only if enabled in env
+        if (!localAuthEnabled) {
+          throw new Error('Local authentication is disabled. Please use backend authentication.')
+        }
+
+        if (!name.trim()) {
+          throw new Error('Name is required')
+        }
+
+        const user = {
+          id: 'u-'+Math.random().toString(36).slice(2,7),
+          name,
+          role,
+          permissions: rolePerms[role] || []
+        }
+        setCurrentUser(user)
+        nav(from, { replace: true })
+      }
+    } catch (err) {
+      logger.error('Login failed:', err)
+
+      // error-parser.js already handles message extraction and cleaning
+      // Just use the error message directly
+      let errorMessage = err.message || 'Login failed'
+
+      // Only override for specific local validation errors
+      if (errorMessage.includes('not enabled')) {
+        errorMessage = 'Authentication service is not available. Please contact your administrator.'
+      }
+
+      setError(errorMessage)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Clear error when user starts typing
+  const handleUsernameChange = (e) => {
+    setUsername(e.target.value)
+    if (error) setError('')
+  }
+
+  const handlePasswordChange = (e) => {
+    setPassword(e.target.value)
+    if (error) setError('')
+  }
+
+  const handleNameChange = (e) => {
+    setName(e.target.value)
+    if (error) setError('')
+  }
+
+  const toggleAuthMode = () => {
+    // Don't allow toggle if local auth is disabled
+    if (!localAuthEnabled) {
+      setError('Local authentication is disabled in environment configuration')
+      return
+    }
+
+    const registry = loadRegistry()
+    const newUseBackend = !useBackend
+
+    // Update registry to enable/disable auth module
+    const updatedRegistry = {
+      ...registry,
+      auth: {
+        ...registry.auth,
+        enabled: newUseBackend
+      }
+    }
+
+    saveRegistry(updatedRegistry)
+    setUseBackend(newUseBackend)
+    setError('')
+  }
+
+  return (
+    <div className="h-full flex items-center justify-center">
+      <form onSubmit={submit} className="card w-full max-w-sm space-y-4">
+        <h1 className="text-xl font-bold">Login</h1>
+
+        {/* Auth Mode Toggle - only show if local auth is enabled */}
+        {localAuthEnabled && (
+          <div className="flex items-center justify-between p-3 bg-gray-50 rounded">
+            <span className="text-sm font-medium">
+              {useBackend ? 'Backend Auth' : 'Local Auth'}
+            </span>
+            <button
+              type="button"
+              onClick={toggleAuthMode}
+              className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
+            >
+              Switch to {useBackend ? 'Local' : 'Backend'}
+            </button>
+          </div>
+        )}
+
+        {/* Show info if local auth is disabled */}
+        {/* {!localAuthEnabled && (
+          <div className="p-3 bg-blue-50 border border-blue-200 rounded text-blue-700 text-sm">
+            Backend authentication only
+          </div>
+        )} */}
+
+        {error && (
+          <div className="p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+            {error}
+          </div>
+        )}
+
+        {useBackend ? (
+          // Backend Authentication Form
+          <>
+            {/* <div className="text-sm text-slate-500">
+              Backend authentication — enter your credentials
+            </div> */}
+            <div className="space-y-1">
+              <label className="text-sm font-medium">Username</label>
+              <input
+                className="border rounded px-3 py-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={username}
+                onChange={handleUsernameChange}
+                placeholder="Enter username"
+                disabled={loading}
+                autoFocus
+                autoComplete="username"
+                required
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-sm font-medium">Password</label>
+              <input
+                type="password"
+                className="border rounded px-3 py-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={password}
+                onChange={handlePasswordChange}
+                placeholder="Enter password"
+                disabled={loading}
+                autoComplete="current-password"
+                required
+              />
+            </div>
+          </>
+        ) : (
+          // Local Authentication Form
+          <>
+            <div className="text-sm text-slate-500">
+              Mock auth — pilih nama & role untuk menguji RBAC
+            </div>
+            <div className="space-y-1">
+              <label className="text-sm font-medium">Name</label>
+              <input
+                className="border rounded px-3 py-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={name}
+                onChange={handleNameChange}
+                placeholder="Enter your name"
+                disabled={loading}
+                autoFocus
+                required
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-sm font-medium">Role</label>
+              <select
+                className="border rounded px-3 py-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={role}
+                onChange={e=>setRole(e.target.value)}
+                disabled={loading}
+              >
+                <option value="technologist">Technologist</option>
+                <option value="clerk">Clerk</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+          </>
+        )}
+
+        <button
+          type="submit"
+          className="px-3 py-2 rounded-lg bg-blue-600 text-white text-sm w-full disabled:bg-gray-400"
+          disabled={loading}
+        >
+          {loading ? 'Logging in...' : 'Login'}
+        </button>
+
+        {useBackend && (
+          <div className="text-xs text-gray-500 text-center">
+            {/* Default credentials: admin / password123 */}
+          </div>
+        )}
+      </form>
+    </div>
+  )
+}
+

@@ -1,0 +1,350 @@
+"""
+WADO-RS API Endpoints
+DICOMweb RESTful Services for image retrieval
+Implements WADO-RS standard
+"""
+
+import logging
+from typing import Optional
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
+
+from app.database import get_db
+from app.services.wado_service import get_wado_service
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/wado-rs", tags=["wado-rs"])
+
+
+@router.get("/studies/{study_id}")
+async def get_study(
+    study_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get all instances in a study (WADO-RS)
+    
+    Args:
+        study_id: Study Instance UID
+        db: Database session
+        
+    Returns:
+        List of instances
+    """
+    try:
+        wado = get_wado_service(db)
+        instances = await wado.get_study_instances(study_id)
+        
+        return {
+            "study_id": study_id,
+            "instance_count": len(instances),
+            "instances": instances
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get study: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/studies/{study_id}/series/{series_id}")
+async def get_series(
+    study_id: str,
+    series_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get all instances in a series (WADO-RS)
+    
+    Args:
+        study_id: Study Instance UID
+        series_id: Series Instance UID
+        db: Database session
+        
+    Returns:
+        List of instances
+    """
+    try:
+        wado = get_wado_service(db)
+        instances = await wado.get_series_instances(study_id, series_id)
+        
+        return {
+            "study_id": study_id,
+            "series_id": series_id,
+            "instance_count": len(instances),
+            "instances": instances
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get series: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/studies/{study_id}/series/{series_id}/instances/{instance_id}")
+async def get_instance(
+    study_id: str,
+    series_id: str,
+    instance_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get DICOM instance file (WADO-RS)
+    
+    Args:
+        study_id: Study Instance UID
+        series_id: Series Instance UID
+        instance_id: SOP Instance UID
+        db: Database session
+        
+    Returns:
+        DICOM file
+    """
+    try:
+        wado = get_wado_service(db)
+        data = await wado.get_instance(study_id, series_id, instance_id)
+        
+        if not data:
+            raise HTTPException(status_code=404, detail="Instance not found")
+        
+        return Response(
+            content=data,
+            media_type="application/dicom",
+            headers={
+                "Content-Disposition": f"attachment; filename={instance_id}.dcm"
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get instance: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/studies/{study_id}/series/{series_id}/instances/{instance_id}/metadata")
+async def get_instance_metadata(
+    study_id: str,
+    series_id: str,
+    instance_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get instance metadata without pixel data (WADO-RS)
+    
+    Args:
+        study_id: Study Instance UID
+        series_id: Series Instance UID
+        instance_id: SOP Instance UID
+        db: Database session
+        
+    Returns:
+        Instance metadata
+    """
+    try:
+        wado = get_wado_service(db)
+        metadata = await wado.get_instance_metadata(study_id, series_id, instance_id)
+        
+        if not metadata:
+            raise HTTPException(status_code=404, detail="Instance not found")
+        
+        return metadata
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get metadata: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/studies/{study_id}/series/{series_id}/instances/{instance_id}/thumbnail")
+async def get_thumbnail(
+    study_id: str,
+    series_id: str,
+    instance_id: str,
+    size: int = Query(200, ge=50, le=500, description="Thumbnail size in pixels"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get thumbnail image (JPEG)
+    
+    Args:
+        study_id: Study Instance UID
+        series_id: Series Instance UID
+        instance_id: SOP Instance UID
+        size: Thumbnail size (50-500px)
+        db: Database session
+        
+    Returns:
+        JPEG image
+    """
+    try:
+        wado = get_wado_service(db)
+        data = await wado.get_thumbnail(study_id, series_id, instance_id, size)
+        
+        if not data:
+            raise HTTPException(
+                status_code=404, 
+                detail="Thumbnail not available"
+            )
+        
+        return Response(
+            content=data,
+            media_type="image/jpeg",
+            headers={
+                "Cache-Control": "public, max-age=3600"
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get thumbnail: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/studies/{study_id}/series/{series_id}/instances/{instance_id}/rendered")
+async def get_rendered_image(
+    study_id: str,
+    series_id: str,
+    instance_id: str,
+    window_center: Optional[int] = Query(None, description="Window center"),
+    window_width: Optional[int] = Query(None, description="Window width"),
+    quality: int = Query(90, ge=1, le=100, description="JPEG quality"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get rendered image with windowing (JPEG)
+    
+    Args:
+        study_id: Study Instance UID
+        series_id: Series Instance UID
+        instance_id: SOP Instance UID
+        window_center: Window center for display
+        window_width: Window width for display
+        quality: JPEG quality (1-100)
+        db: Database session
+        
+    Returns:
+        JPEG image
+    """
+    try:
+        wado = get_wado_service(db)
+        data = await wado.get_rendered_image(
+            study_id, 
+            series_id, 
+            instance_id,
+            window_center,
+            window_width,
+            quality
+        )
+        
+        if not data:
+            raise HTTPException(
+                status_code=404, 
+                detail="Image not available"
+            )
+        
+        return Response(
+            content=data,
+            media_type="image/jpeg",
+            headers={
+                "Cache-Control": "public, max-age=300"
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to render image: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/studies/{study_id}/series/{series_id}/instances/{instance_id}/frames/{frame_number}")
+async def get_frame(
+    study_id: str,
+    series_id: str,
+    instance_id: str,
+    frame_number: int,
+    frame: Optional[int] = Query(None, alias="fram", description="Frame number (query param alias)"),
+    imageQuality: int = Query(90, ge=1, le=100, description="JPEG quality"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get specific frame from multi-frame instance (WADO-RS)
+    
+    Args:
+        study_id: Study Instance UID
+        series_id: Series Instance UID
+        instance_id: SOP Instance UID  
+        frame_number: Frame number from path (1-based)
+        frame: Frame number from query param (alias for OHIF)
+        imageQuality: JPEG quality (1-100)
+        db: Database session
+        
+    Returns:
+        JPEG frame image
+    """
+    try:
+        # Use frame_number from path, fallback to query param
+        frame_num = frame_number if frame_number else (frame or 1)
+        
+        wado = get_wado_service(db)
+        data = await wado.get_frame(study_id, series_id, instance_id, frame_num, imageQuality)
+        
+        if not data:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Frame {frame_num} not available"
+            )
+        
+        return Response(
+            content=data,
+            media_type="image/jpeg",
+            headers={
+                "Content-Type": "image/jpeg",
+                "Cache-Control": "public, max-age=300"
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get frame {frame_num}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/health")
+async def wado_health(db: Session = Depends(get_db)):
+    """
+    WADO-RS health check
+    
+    Args:
+        db: Database session
+        
+    Returns:
+        Health status
+    """
+    try:
+        wado = get_wado_service(db)
+        
+        return {
+            "status": "healthy",
+            "service": "WADO-RS",
+            "version": "1.0.0",
+            "endpoints": [
+                "/wado-rs/studies/{study_id}",
+                "/wado-rs/studies/{study_id}/series/{series_id}",
+                "/wado-rs/studies/{study_id}/series/{series_id}/instances/{instance_id}",
+                "/wado-rs/studies/{study_id}/series/{series_id}/instances/{instance_id}/metadata",
+                "/wado-rs/studies/{study_id}/series/{series_id}/instances/{instance_id}/thumbnail",
+                "/wado-rs/studies/{study_id}/series/{series_id}/instances/{instance_id}/rendered"
+            ]
+        }
+        
+    except Exception as e:
+        logger.error(f"WADO health check failed: {str(e)}")
+        raise HTTPException(
+            status_code=503,
+            detail=f"WADO service unhealthy: {str(e)}"
+        )

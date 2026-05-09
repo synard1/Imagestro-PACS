@@ -1,0 +1,395 @@
+version: '3.8'
+
+services:
+  # Redis - Message Broker & Result Backend
+  redis:
+    image: redis:7-alpine
+    container_name: pacs-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - pacs-network
+      - secure-network
+
+  # Celery Worker - Storage Queue
+  celery-worker-storage:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pacs-celery-storage
+    restart: always
+    command: celery -A app.celery_app worker -Q storage -l info -c 2 -n storage@%h
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - DATABASE_URL=postgresql://dicom:E4RMTJiyTmfUwk%2BtztrRKw%3D%3D@dicom-postgres-secured:5432/worklist_db
+      - DB_HOST=dicom-postgres-secured
+      - DB_PORT=5432
+      - DB_NAME=worklist_db
+      - DB_USER=dicom
+      - DB_PASSWORD=E4RMTJiyTmfUwk+tztrRKw==
+      - ORTHANC_PASSWORD=orthanc
+      - JWT_SECRET=pacs-secret-key-for-testing-2024
+    volumes:
+      - ./app:/app/app
+      - /var/lib/pacs/storage:/var/lib/pacs/storage
+    depends_on:
+      - redis
+    networks:
+      - pacs-network
+      - secure-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Celery Worker - Cleanup Queue
+  celery-worker-cleanup:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pacs-celery-cleanup
+    restart: always
+    command: celery -A app.celery_app worker -Q cleanup -l info -c 1 -n cleanup@%h
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - DATABASE_URL=postgresql://dicom:E4RMTJiyTmfUwk%2BtztrRKw%3D%3D@dicom-postgres-secured:5432/worklist_db
+      - DB_HOST=dicom-postgres-secured
+      - DB_PORT=5432
+      - DB_NAME=worklist_db
+      - DB_USER=dicom
+      - DB_PASSWORD=E4RMTJiyTmfUwk+tztrRKw==
+      - ORTHANC_PASSWORD=orthanc
+      - JWT_SECRET=pacs-secret-key-for-testing-2024
+    volumes:
+      - ./app:/app/app
+      - /var/lib/pacs/storage:/var/lib/pacs/storage
+    depends_on:
+      - redis
+    networks:
+      - pacs-network
+      - secure-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Celery Worker - Migration Queue
+  celery-worker-migration:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pacs-celery-migration
+    restart: always
+    command: celery -A app.celery_app worker -Q migration -l info -c 1 -n migration@%h
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - DATABASE_URL=postgresql://dicom:E4RMTJiyTmfUwk%2BtztrRKw%3D%3D@dicom-postgres-secured:5432/worklist_db
+      - DB_HOST=dicom-postgres-secured
+      - DB_PORT=5432
+      - DB_NAME=worklist_db
+      - DB_USER=dicom
+      - DB_PASSWORD=E4RMTJiyTmfUwk+tztrRKw==
+      - ORTHANC_PASSWORD=orthanc
+      - JWT_SECRET=pacs-secret-key-for-testing-2024
+    volumes:
+      - ./app:/app/app
+      - /var/lib/pacs/storage:/var/lib/pacs/storage
+    depends_on:
+      - redis
+    networks:
+      - pacs-network
+      - secure-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Celery Worker - HL7 ADT Queue
+  celery-worker-hl7-adt:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pacs-celery-hl7-adt
+    restart: always
+    command: celery -A app.celery_app worker -Q hl7_adt -l info -c 4 -n hl7_adt@%h
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - DATABASE_URL=postgresql://dicom:E4RMTJiyTmfUwk%2BtztrRKw%3D%3D@dicom-postgres-secured:5432/worklist_db
+      - DB_HOST=dicom-postgres-secured
+      - DB_PORT=5432
+      - DB_NAME=worklist_db
+      - DB_USER=dicom
+      - DB_PASSWORD=E4RMTJiyTmfUwk+tztrRKw==
+      - ORTHANC_PASSWORD=orthanc
+      - JWT_SECRET=pacs-secret-key-for-testing-2024
+    volumes:
+      - ./app:/app/app
+    depends_on:
+      - redis
+    networks:
+      - pacs-network
+      - secure-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Celery Worker - HL7 ORM Queue
+  celery-worker-hl7-orm:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pacs-celery-hl7-orm
+    restart: always
+    command: celery -A app.celery_app worker -Q hl7_orm -l info -c 4 -n hl7_orm@%h
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - DATABASE_URL=postgresql://dicom:E4RMTJiyTmfUwk%2BtztrRKw%3D%3D@dicom-postgres-secured:5432/worklist_db
+      - DB_HOST=dicom-postgres-secured
+      - DB_PORT=5432
+      - DB_NAME=worklist_db
+      - DB_USER=dicom
+      - DB_PASSWORD=E4RMTJiyTmfUwk+tztrRKw==
+      - ORTHANC_PASSWORD=orthanc
+      - JWT_SECRET=pacs-secret-key-for-testing-2024
+    volumes:
+      - ./app:/app/app
+    depends_on:
+      - redis
+    networks:
+      - pacs-network
+      - secure-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Celery Worker - HL7 ORU Queue
+  celery-worker-hl7-oru:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pacs-celery-hl7-oru
+    restart: always
+    command: celery -A app.celery_app worker -Q hl7_oru -l info -c 4 -n hl7_oru@%h
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - DATABASE_URL=postgresql://dicom:E4RMTJiyTmfUwk%2BtztrRKw%3D%3D@dicom-postgres-secured:5432/worklist_db
+      - DB_HOST=dicom-postgres-secured
+      - DB_PORT=5432
+      - DB_NAME=worklist_db
+      - DB_USER=dicom
+      - DB_PASSWORD=E4RMTJiyTmfUwk+tztrRKw==
+      - ORTHANC_PASSWORD=orthanc
+      - JWT_SECRET=pacs-secret-key-for-testing-2024
+    volumes:
+      - ./app:/app/app
+    depends_on:
+      - redis
+    networks:
+      - pacs-network
+      - secure-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Celery Worker - HL7 Maintenance Queue
+  celery-worker-hl7-maintenance:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pacs-celery-hl7-maintenance
+    restart: always
+    command: celery -A app.celery_app worker -Q hl7_maintenance -l info -c 2 -n hl7_maintenance@%h
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - DATABASE_URL=postgresql://dicom:E4RMTJiyTmfUwk%2BtztrRKw%3D%3D@dicom-postgres-secured:5432/worklist_db
+      - DB_HOST=dicom-postgres-secured
+      - DB_PORT=5432
+      - DB_NAME=worklist_db
+      - DB_USER=dicom
+      - DB_PASSWORD=E4RMTJiyTmfUwk+tztrRKw==
+      - ORTHANC_PASSWORD=orthanc
+      - JWT_SECRET=pacs-secret-key-for-testing-2024
+    volumes:
+      - ./app:/app/app
+    depends_on:
+      - redis
+    networks:
+      - pacs-network
+      - secure-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Celery Worker - FHIR Conversion Queue
+  celery-worker-fhir-conversion:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pacs-celery-fhir-conversion
+    restart: always
+    command: celery -A app.celery_app worker -Q fhir_conversion -l info -c 4 -n fhir_conversion@%h
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - DATABASE_URL=postgresql://dicom:E4RMTJiyTmfUwk%2BtztrRKw%3D%3D@dicom-postgres-secured:5432/worklist_db
+      - DB_HOST=dicom-postgres-secured
+      - DB_PORT=5432
+      - DB_NAME=worklist_db
+      - DB_USER=dicom
+      - DB_PASSWORD=E4RMTJiyTmfUwk+tztrRKw==
+      - ORTHANC_PASSWORD=orthanc
+      - JWT_SECRET=pacs-secret-key-for-testing-2024
+    volumes:
+      - ./app:/app/app
+    depends_on:
+      - redis
+    networks:
+      - pacs-network
+      - secure-network
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.celery_app inspect ping || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Celery Worker - FHIR Maintenance Queue
+  celery-worker-fhir-maintenance:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pacs-celery-fhir-maintenance
+    restart: always
+    command: celery -A app.celery_app worker -Q fhir_maintenance -l info -c 2 -n fhir_maintenance@%h
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - DATABASE_URL=postgresql://dicom:E4RMTJiyTmfUwk%2BtztrRKw%3D%3D@dicom-postgres-secured:5432/worklist_db
+      - DB_HOST=dicom-postgres-secured
+      - DB_PORT=5432
+      - DB_NAME=worklist_db
+      - DB_USER=dicom
+      - DB_PASSWORD=E4RMTJiyTmfUwk+tztrRKw==
+      - ORTHANC_PASSWORD=orthanc
+      - JWT_SECRET=pacs-secret-key-for-testing-2024
+    volumes:
+      - ./app:/app/app
+    depends_on:
+      - redis
+    networks:
+      - pacs-network
+      - secure-network
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.celery_app inspect ping || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Celery Beat - Scheduler
+  celery-beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pacs-celery-beat
+    restart: always
+    command: celery -A app.celery_app beat -l info --scheduler celery.beat:PersistentScheduler
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - DATABASE_URL=postgresql://dicom:E4RMTJiyTmfUwk%2BtztrRKw%3D%3D@dicom-postgres-secured:5432/worklist_db
+      - DB_HOST=dicom-postgres-secured
+      - DB_PORT=5432
+      - DB_NAME=worklist_db
+      - DB_USER=dicom
+      - DB_PASSWORD=E4RMTJiyTmfUwk+tztrRKw==
+      - ORTHANC_PASSWORD=orthanc
+      - JWT_SECRET=pacs-secret-key-for-testing-2024
+    volumes:
+      - ./app:/app/app
+      - celery_beat_data:/app/celerybeat-schedule
+    depends_on:
+      - redis
+    networks:
+      - pacs-network
+      - secure-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Flower - Celery Monitoring Dashboard
+  flower:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pacs-flower
+    restart: always
+    command: celery -A app.celery_app flower --port=5555
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    ports:
+      - "5555:5555"
+    depends_on:
+      - redis
+      - celery-worker-storage
+    networks:
+      - pacs-network
+      - secure-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  redis_data:
+    driver: local
+  celery_beat_data:
+    driver: local
+
+networks:
+  pacs-network:
+    driver: bridge
+  secure-network:
+    external: true
+    name: fullstack-orthanc-dicom_secure-network

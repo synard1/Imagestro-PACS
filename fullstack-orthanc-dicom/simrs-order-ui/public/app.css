@@ -1,0 +1,94 @@
+:root{--bg:#0b1024;--fg:#eaf0ff;--muted:#98a1c0;--card:#12183a;--accent:#4e8cff;--ok:#2ecc71;--warn:#f39c12;--err:#e74c3c;}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg)}
+.container{max-width:980px;margin:0 auto;padding:16px}
+.app-header{background:linear-gradient(90deg,#0b1024,#151c3f);border-bottom:1px solid #243}
+.app-header h1{margin:0;font-size:20px}
+.app-header .subtitle{margin:4px 0 0;color:var(--muted);font-size:13px}
+.card{background:var(--card);border:1px solid #1b2347;border-radius:10px;padding:16px;margin:16px 0}
+h2{margin:0 0 12px;font-size:18px}
+h3{margin:12px 0 8px;font-size:16px;color:var(--muted)}
+label{display:flex;flex-direction:column;gap:6px;margin:8px 0}
+input,select,textarea{width:100%;padding:10px;border-radius:8px;border:1px solid #2a335f;background:#0e1330;color:var(--fg)}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}
+small.helper{display:block;color:var(--muted)}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+@media(max-width:800px){.grid-2,.grid-3{grid-template-columns:1fr}}
+.actions{display:flex;gap:12px;align-items:center;margin-top:12px}
+.btn{padding:10px 14px;border:1px solid #334;text-transform:uppercase;font-size:12px;letter-spacing:.5px;border-radius:8px;background:#0e1330;color:var(--fg);cursor:pointer}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn:hover{opacity:.9}
+.status{color:var(--muted);font-size:12px}
+.code{background:#0a0f29;padding:12px;border-radius:8px;border:1px solid #1b2347;white-space:pre-wrap}
+.checkbox{display:flex;align-items:center;gap:8px}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center}
+.modal-content{width:min(680px,90%);background:var(--card);border:1px solid #1b2347;border-radius:12px;padding:16px}
+.toast{position:fixed;bottom:16px;right:16px;background:#0e1330;border:1px solid #1b2347;border-radius:8px;padding:10px 12px;color:#fff}
+[hidden]{display:none!important}
+.modal[hidden]{display:none!important}
+.toast[hidden]{display:none!important}
+.table-responsive { max-height: 360px; overflow: auto; border: 1px solid #1b2347; border-radius: 8px; }
+.table { width: 100%; border-collapse: collapse; }
+.table th, .table td { border: 1px solid #1b2347; padding: 8px; }
+.table thead th { background: #0e1330; position: sticky; top: 0; }
+.table tbody tr:hover { background: #0e1330; cursor: pointer; }
+.modal-content.wide { width: min(960px, 95%); }
+/* Spinner untuk tombol Kirim per baris */
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  vertical-align: middle;
+  margin-left: 6px;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+button.loading {
+  opacity: 0.7;
+  pointer-events: none;
+}
+/* Badge status Encounter/ServiceRequest */
+.badge {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1;
+  border: 1px solid #ccc;
+}
+.badge.ok {
+  color: #1e7e34;
+  background-color: #d4edda;
+  border-color: #c3e6cb;
+}
+.badge.warn {
+  color: #856404;
+  background-color: #fff3cd;
+  border-color: #ffeeba;
+}
+/* Variasi tombol tambahan untuk aksi tabel dan form */
+.btn.outline { background: transparent; border-color: var(--accent); color: var(--fg); }
+.btn.outline:hover { background: rgba(78, 140, 255, 0.12); }
+.btn.danger { background: var(--err); border-color: var(--err); color: #fff; }
+.btn.danger:hover { filter: brightness(0.95); }
+.btn.success { background: var(--ok); border-color: var(--ok); color: #fff; }
+.btn.success:hover { filter: brightness(0.95); }
+
+/* Responsivitas tambahan untuk aksi dan tabel */
+@media (max-width: 800px) {
+  .actions { flex-wrap: wrap; }
+  .table { font-size: 12px; }
+}
+
+/* Perbaikan tabel agar lebih nyaman dibaca */
+.table thead th { background: #0f1738; position: sticky; top: 0; z-index: 1; }
+.table tbody tr:hover { background: #121b42; cursor: pointer; }
+
+/* Pastikan area tabel bisa digulir horizontal jika kolom banyak */
+.table-responsive { overflow-x: auto; }

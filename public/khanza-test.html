@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Khanza API Configuration Test</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            max-width: 800px;
+            width: 100%;
+            padding: 40px;
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+        
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+        
+        .config-section {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .config-item {
+            margin-bottom: 15px;
+        }
+        
+        .config-item:last-child {
+            margin-bottom: 0;
+        }
+        
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 5px;
+            color: #333;
+            font-size: 14px;
+        }
+        
+        input[type="text"],
+        input[type="password"],
+        input[type="number"] {
+            width: 100%;
+            padding: 10px 12px;
+            border: 2px solid #e1e4e8;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+        
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        .value {
+            font-family: 'Courier New', monospace;
+            background: white;
+            padding: 10px 12px;
+            border-radius: 6px;
+            border: 2px solid #e1e4e8;
+            font-size: 13px;
+            word-break: break-all;
+        }
+        
+        .value.success {
+            border-color: #28a745;
+            background: #f0f9f4;
+            color: #28a745;
+        }
+        
+        .value.error {
+            border-color: #dc3545;
+            background: #fef5f5;
+            color: #dc3545;
+        }
+        
+        .value.empty {
+            color: #999;
+            font-style: italic;
+        }
+        
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+        
+        .btn:active {
+            transform: translateY(0);
+        }
+        
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .btn-secondary {
+            background: #6c757d;
+        }
+        
+        .result {
+            margin-top: 20px;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+            background: #f8f9fa;
+        }
+        
+        .result.success {
+            border-left-color: #28a745;
+            background: #f0f9f4;
+        }
+        
+        .result.error {
+            border-left-color: #dc3545;
+            background: #fef5f5;
+        }
+        
+        .result-title {
+            font-weight: 600;
+            margin-bottom: 10px;
+            font-size: 16px;
+        }
+        
+        .result-content {
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        
+        .status-indicator.success {
+            background: #28a745;
+            box-shadow: 0 0 0 4px rgba(40, 167, 69, 0.2);
+        }
+        
+        .status-indicator.error {
+            background: #dc3545;
+            box-shadow: 0 0 0 4px rgba(220, 53, 69, 0.2);
+        }
+        
+        .status-indicator.pending {
+            background: #ffc107;
+            box-shadow: 0 0 0 4px rgba(255, 193, 7, 0.2);
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-left: 10px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .help-text {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 Khanza API Configuration Test</h1>
+        <p class="subtitle">Test your Khanza SIMRS integration settings</p>
+        
+        <!-- Environment Configuration -->
+        <div class="config-section">
+            <h3 style="margin-bottom: 15px; color: #333;">Environment Variables</h3>
+            
+            <div class="config-item">
+                <label>VITE_KHANZA_BASE_URL</label>
+                <div class="value" id="env-base-url">Not set</div>
+            </div>
+            
+            <div class="config-item">
+                <label>VITE_KHANZA_API_KEY</label>
+                <div class="value" id="env-api-key">Not set</div>
+            </div>
+            
+            <div class="config-item">
+                <label>VITE_KHANZA_TIMEOUT_MS</label>
+                <div class="value" id="env-timeout">Not set</div>
+            </div>
+        </div>
+        
+        <!-- Manual Test Configuration -->
+        <div class="config-section">
+            <h3 style="margin-bottom: 15px; color: #333;">Manual Test</h3>
+            
+            <div class="config-item">
+                <label for="test-base-url">Base URL</label>
+                <input type="text" id="test-base-url" placeholder="http://103.42.117.19:3007" value="http://103.42.117.19:3007">
+            </div>
+            
+            <div class="config-item">
+                <label for="test-api-key">API Key</label>
+                <input type="password" id="test-api-key" placeholder="Enter your API key">
+                <p class="help-text">Your API key will not be saved or transmitted anywhere except to the Khanza API</p>
+            </div>
+            
+            <div class="config-item">
+                <label for="test-date-start">Start Date</label>
+                <input type="text" id="test-date-start" placeholder="YYYY-MM-DD">
+            </div>
+            
+            <div class="config-item">
+                <label for="test-date-end">End Date</label>
+                <input type="text" id="test-date-end" placeholder="YYYY-MM-DD">
+            </div>
+        </div>
+        
+        <!-- Action Buttons -->
+        <div style="margin-top: 20px;">
+            <button class="btn" onclick="testConnection()">
+                Test Connection
+            </button>
+            <button class="btn" onclick="testFetchOrders()">
+                Test Fetch Orders
+            </button>
+            <button class="btn btn-secondary" onclick="clearResult()">
+                Clear Result
+            </button>
+        </div>
+        
+        <!-- Result Area -->
+        <div id="result" style="display: none;"></div>
+    </div>
+    
+    <script type="module">
+        // Load environment variables
+        window.addEventListener('DOMContentLoaded', () => {
+            const baseUrl = import.meta.env.VITE_KHANZA_BASE_URL || '';
+            const apiKey = import.meta.env.VITE_KHANZA_API_KEY || '';
+            const timeout = import.meta.env.VITE_KHANZA_TIMEOUT_MS || '';
+            
+            // Display environment variables
+            displayEnvVar('env-base-url', baseUrl);
+            displayEnvVar('env-api-key', apiKey, true);
+            displayEnvVar('env-timeout', timeout);
+            
+            // Pre-fill test fields
+            if (baseUrl) document.getElementById('test-base-url').value = baseUrl;
+            if (apiKey) document.getElementById('test-api-key').value = apiKey;
+            
+            // Set default dates
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('test-date-start').value = today;
+            document.getElementById('test-date-end').value = today;
+        });
+        
+        function displayEnvVar(elementId, value, mask = false) {
+            const el = document.getElementById(elementId);
+            if (value) {
+                el.textContent = mask ? maskApiKey(value) : value;
+                el.classList.add('success');
+                el.classList.remove('empty', 'error');
+            } else {
+                el.textContent = 'Not configured';
+                el.classList.add('empty');
+                el.classList.remove('success', 'error');
+            }
+        }
+        
+        function maskApiKey(key) {
+            if (!key || key.length < 8) return '••••••••';
+            return key.substring(0, 4) + '••••••••' + key.substring(key.length - 4);
+        }
+        
+        window.testConnection = async function() {
+            const baseUrl = document.getElementById('test-base-url').value;
+            const apiKey = document.getElementById('test-api-key').value;
+            
+            if (!baseUrl) {
+                showResult('error', 'Error', 'Please enter a base URL');
+                return;
+            }
+            
+            if (!apiKey) {
+                showResult('error', 'Error', 'Please enter an API key');
+                return;
+            }
+            
+            showResult('pending', 'Testing Connection...', 'Sending request to Khanza API...');
+            
+            try {
+                const url = `${baseUrl}/health`;
+                const response = await fetch(url, {
+                    method: 'GET',
+                    headers: {
+                        'X-API-Key': apiKey,
+                        'Accept': 'application/json'
+                    }
+                });
+                
+                const data = await response.json().catch(() => null);
+                
+                if (response.ok) {
+                    showResult('success', '✅ Connection Successful', 
+                        `Status: ${response.status}\nResponse: ${JSON.stringify(data, null, 2)}`);
+                } else {
+                    showResult('error', '❌ Connection Failed', 
+                        `Status: ${response.status} ${response.statusText}\nResponse: ${JSON.stringify(data, null, 2) || 'No response body'}`);
+                }
+            } catch (error) {
+                showResult('error', '❌ Connection Error', 
+                    `Error: ${error.message}\n\nThis usually means:\n- The API URL is incorrect or unreachable\n- Network connectivity issues\n- CORS policy blocking the request`);
+            }
+        };
+        
+        window.testFetchOrders = async function() {
+            const baseUrl = document.getElementById('test-base-url').value;
+            const apiKey = document.getElementById('test-api-key').value;
+            const startDate = document.getElementById('test-date-start').value;
+            const endDate = document.getElementById('test-date-end').value;
+            
+            if (!baseUrl || !apiKey) {
+                showResult('error', 'Error', 'Please enter base URL and API key');
+                return;
+            }
+            
+            if (!startDate || !endDate) {
+                showResult('error', 'Error', 'Please enter start and end dates');
+                return;
+            }
+            
+            showResult('pending', 'Fetching Orders...', 'Sending request to Khanza API...');
+            
+            try {
+                const url = `${baseUrl}/api/radiologi?tgl_mulai=${startDate}&tgl_akhir=${endDate}`;
+                const response = await fetch(url, {
+                    method: 'GET',
+                    headers: {
+                        'X-API-Key': apiKey,
+                        'Accept': 'application/json'
+                    }
+                });
+                
+                const data = await response.json().catch(() => null);
+                
+                if (response.ok) {
+                    const count = Array.isArray(data) ? data.length : (data?.data?.length || 0);
+                    showResult('success', `✅ Success - Found ${count} Orders`, 
+                        JSON.stringify(data, null, 2));
+                } else {
+                    showResult('error', '❌ Request Failed', 
+                        `Status: ${response.status} ${response.statusText}\n\n` +
+                        `${response.status === 401 ? 'Authentication failed. Please check your API key.' : ''}\n\n` +
+                        `Response: ${JSON.stringify(data, null, 2) || 'No response body'}`);
+                }
+            } catch (error) {
+                showResult('error', '❌ Request Error', 
+                    `Error: ${error.message}\n\nPossible causes:\n- Network connectivity issues\n- CORS policy blocking\n- Invalid URL`);
+            }
+        };
+        
+        function showResult(type, title, content) {
+            const resultDiv = document.getElementById('result');
+            resultDiv.style.display = 'block';
+            resultDiv.className = `result ${type}`;
+            
+            const indicator = type === 'success' ? '●' : type === 'error' ? '●' : '●';
+            const indicatorClass = type === 'success' ? 'success' : type === 'error' ? 'error' : 'pending';
+            
+            resultDiv.innerHTML = `
+                <div class="result-title">
+                    <span class="status-indicator ${indicatorClass}"></span>
+                    ${title}
+                </div>
+                <div class="result-content">${content}</div>
+            `;
+            
+            resultDiv.scrollIntoView({ behavior: 'smooth' });
+        }
+        
+        window.clearResult = function() {
+            const resultDiv = document.getElementById('result');
+            resultDiv.style.display = 'none';
+            resultDiv.innerHTML = '';
+        };
+    </script>
+</body>
+</html>

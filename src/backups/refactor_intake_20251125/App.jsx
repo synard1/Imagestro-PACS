@@ -1,0 +1,391 @@
+import { useEffect, useState, Suspense, useMemo, lazy } from 'react'
+import { Routes, Route, Navigate, Outlet } from 'react-router-dom'
+import { useAuth } from './hooks/useAuth'
+import { useTokenRefresh } from './hooks/useTokenRefresh'
+import { initializeAuth } from './services/authService'
+import { loadRegistry } from './services/api-registry'
+import LoadingScreen from './components/LoadingScreen'
+import ToastProvider from './components/ToastProvider'
+
+// Lazy load all components to prevent loading on login page
+const Layout = lazy(() => import('./components/Layout'))
+const Login = lazy(() => import('./pages/Login'))
+const ProtectedRoute = lazy(() => import('./components/ProtectedRoute'))
+const Dashboard = lazy(() => import('./pages/Dashboard'))
+const Worklist = lazy(() => import('./pages/Worklist'))
+const OrderForm = lazy(() => import('./pages/OrderForm'))
+const Orders = lazy(() => import('./pages/Orders'))
+const SatusehatMonitor = lazy(() => import('./pages/SatusehatMonitorClean'))
+const OrderWorkflow = lazy(() => import('./pages/OrderWorkflow'))
+const Studies = lazy(() => import('./pages/Studies'))
+const StudyListEnhanced = lazy(() => import('./pages/studies/StudyListEnhanced'))
+const Patients = lazy(() => import('./pages/Patients'))
+const PatientForm = lazy(() => import('./pages/PatientForm'))
+const Doctors = lazy(() => import('./pages/Doctors'))
+const DoctorForm = lazy(() => import('./pages/DoctorForm'))
+const Modalities = lazy(() => import('./pages/Modalities'))
+const DicomNodes = lazy(() => import('./pages/admin/DicomNodes'))
+const Users = lazy(() => import('./pages/Users'))
+const UserManagement = lazy(() => import('./pages/UserManagement'))
+const RolesManagement = lazy(() => import('./pages/RolesManagement'))
+const PermissionsManagement = lazy(() => import('./pages/PermissionsManagement'))
+const AuditLogs = lazy(() => import('./pages/AuditLogs'))
+const AuthAuditLogs = lazy(() => import('./pages/AuthAuditLogs'))
+const Settings = lazy(() => import('./pages/Settings'))
+const ReportSettings = lazy(() => import('./pages/settings/ReportSettings'))
+const DicomViewer = lazy(() => import('./pages/DicomViewer'))
+const DicomUidGenerator = lazy(() => import('./pages/DicomUidGenerator'))
+const StudyDetail = lazy(() => import('./pages/viewer/StudyDetail'))
+const DicomViewerDemo = lazy(() => import('./pages/viewer/DicomViewerDemo'))
+const DicomViewerEnhanced = lazy(() => import('./pages/viewer/DicomViewerEnhanced'))
+const DicomViewerSimple = lazy(() => import('./pages/viewer/DicomViewerSimple'))
+const DicomViewerClean = lazy(() => import('./pages/viewer/DicomViewerClean'))
+const ReportEditor = lazy(() => import('./pages/reporting/ReportEditor'))
+const VerifySignature = lazy(() => import('./pages/VerifySignature'))
+const SignatureTest = lazy(() => import('./pages/SignatureTest'))
+const DicomUploadPage = lazy(() => import('./pages/DicomUploadPage'))
+const DicomUpload = lazy(() => import('./pages/DicomUpload'))
+const Reports = lazy(() => import('./pages/Reports'))
+const NotFound = lazy(() => import('./pages/NotFound'))
+const Procedures = lazy(() => import('./pages/Procedures'))
+const ProcedureForm = lazy(() => import('./pages/ProcedureForm'))
+const Mappings = lazy(() => import('./pages/Mappings'))
+const MappingForm = lazy(() => import('./pages/MappingForm'))
+const ExternalSystemsDocs = lazy(() => import('./pages/ExternalSystemsDocs'))
+const ExternalSystemDocForm = lazy(() => import('./pages/ExternalSystemDocForm'))
+const DebugStorage = lazy(() => import('./pages/DebugStorage'))
+const EnhancedAuditLogs = lazy(() => import('./pages/EnhancedAuditLogs'))
+const StorageLifecycleManagement = lazy(() => import('./pages/StorageLifecycleManagement'))
+const IntegrationMonitor = lazy(() => import('./pages/IntegrationMonitor'))
+const IntakeDashboard = lazy(() => import('./pages/pacs/intake/IntakeDashboard'))
+const IntakeSchedule = lazy(() => import('./pages/pacs/intake/IntakeSchedule'))
+
+const REPORTS_ALLOWED_ROLES = ['superadmin', 'developer']
+
+// Layout wrapper component for nested routes
+function LayoutWrapper() {
+  return (
+    <Layout>
+      <Outlet />
+    </Layout>
+  )
+}
+
+// Simple login layout component
+function LoginLayout({ children }) {
+  return (
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <div className="w-full max-w-md">
+        {children}
+      </div>
+    </div>
+  )
+}
+
+// Home redirect component
+function HomeIndex() {
+  return <Navigate to="/dashboard" replace />
+}
+
+// Loading component
+function AppLoading() {
+  return <LoadingScreen message="Loading application..." />
+}
+
+export default function App() {
+  const { currentUser } = useAuth() || {}
+  const [isInitializing, setIsInitializing] = useState(true)
+  const canAccessReports = useMemo(() => {
+    const role = (currentUser?.role || '').toLowerCase()
+    return REPORTS_ALLOWED_ROLES.includes(role)
+  }, [currentUser])
+
+  // DICOM Viewer mode configuration
+  const viewerMode = import.meta.env.VITE_DICOM_VIEWER_MODE || 'simple'
+  const DicomViewer = viewerMode === 'enhanced' ? DicomViewerEnhanced : DicomViewerSimple
+
+  // Auto-refresh token before expiration
+  useTokenRefresh()
+
+  useEffect(() => {
+    // Initialize auth on app mount
+    async function init() {
+      try {
+        const registry = loadRegistry()
+        const authConfig = registry.auth
+
+        // Only initialize if backend auth is enabled
+        if (authConfig && authConfig.enabled) {
+          await initializeAuth()
+        }
+      } catch (error) {
+        console.error('Failed to initialize auth:', error)
+        // Continue anyway - user will be redirected to login if needed
+      } finally {
+        setIsInitializing(false)
+      }
+    }
+
+    init()
+  }, [])
+
+  // Show loading state while initializing
+  if (isInitializing) {
+    return <AppLoading />
+  }
+
+  return (
+    <ToastProvider>
+      <Suspense fallback={<AppLoading />}>
+        <Routes>
+          {/* Public route - Login page (no Layout) */}
+          <Route path="/login" element={
+            <LoginLayout>
+              <Login />
+            </LoginLayout>
+          } />
+
+          {/* Public routes - No auth required */}
+          <Route path="/verify-signature" element={<VerifySignature />} />
+          <Route path="/signature-test" element={<SignatureTest />} />
+
+          {/* PACS Upload - Protected */}
+          <Route path="/upload" element={
+            <ProtectedRoute permissions={['studies.upload']}>
+              <DicomUploadPage />
+            </ProtectedRoute>
+          } />
+
+          {/* Protected routes - Wrapped with Layout using Outlet */}
+          <Route path="/" element={<HomeIndex />} />
+
+          {/* All authenticated routes share the same Layout instance */}
+          <Route element={<LayoutWrapper />}>
+            <Route path="/dashboard" element={
+              <ProtectedRoute permissions={['dashboard.view']}>
+                <Dashboard />
+              </ProtectedRoute>
+            } />
+            <Route path="/worklist" element={
+              <ProtectedRoute permissions={['worklist.view']}>
+                <Worklist />
+              </ProtectedRoute>
+            } />
+            <Route path="/orders/new" element={
+              <ProtectedRoute permissions={['order.create', 'order.*']} any>
+                <OrderForm />
+              </ProtectedRoute>
+            } />
+            <Route path="/orders/workflow" element={
+              <ProtectedRoute permissions={['order.view', 'order.*']} any>
+                <OrderWorkflow />
+              </ProtectedRoute>
+            } />
+            <Route path="/orders/:id" element={
+              <ProtectedRoute permissions={['order.view', 'order.update', 'order.*']} any>
+                <OrderForm />
+              </ProtectedRoute>
+            } />
+            <Route path="/orders" element={
+              <ProtectedRoute permissions={['order.view', 'order.*']} any>
+                <Orders />
+              </ProtectedRoute>
+            } />
+            <Route path="/reports" element={
+              <ProtectedRoute permissions={['report.view', 'order.view', '*']} any>
+                <Reports canAccessReports={canAccessReports} />
+              </ProtectedRoute>
+            } />
+            <Route path="/satusehat-monitor" element={
+              <ProtectedRoute permissions={['order.view', 'order.*']} any>
+                <SatusehatMonitor />
+              </ProtectedRoute>
+            } />
+            <Route path="/pacs/intake" element={
+              <ProtectedRoute permissions={['intake.view', 'intake.*']} any>
+                <IntakeDashboard />
+              </ProtectedRoute>
+            } />
+            <Route path="/pacs/intake/schedule/:id" element={
+              <ProtectedRoute permissions={['intake.schedule', 'intake.*']} any>
+                <IntakeSchedule />
+              </ProtectedRoute>
+            } />
+            <Route path="/studies" element={
+              <ProtectedRoute permissions={['study.view', 'study.*']} any>
+                <StudyListEnhanced />
+              </ProtectedRoute>
+            } />
+            <Route path="/studies/legacy" element={
+              <ProtectedRoute permissions={['study.view', 'study.*']} any>
+                <Studies />
+              </ProtectedRoute>
+            } />
+            <Route path="/patients/new" element={
+              <ProtectedRoute permissions={['patient.create', 'patient.*']} any>
+                <PatientForm />
+              </ProtectedRoute>
+            } />
+            <Route path="/patients/:id" element={
+              <ProtectedRoute permissions={['patient.view', 'patient.update', 'patient.*']} any>
+                <PatientForm />
+              </ProtectedRoute>
+            } />
+            <Route path="/patients" element={
+              <ProtectedRoute permissions={['patient.view', 'patient.*']} any>
+                <Patients />
+              </ProtectedRoute>
+            } />
+            <Route path="/procedures/new" element={
+              <ProtectedRoute permissions={['procedure.create', 'procedure.*']} any>
+                <ProcedureForm />
+              </ProtectedRoute>
+            } />
+            <Route path="/procedures/:id" element={
+              <ProtectedRoute permissions={['procedure.view', 'procedure.update', 'procedure.*']} any>
+                <ProcedureForm />
+              </ProtectedRoute>
+            } />
+            <Route path="/procedures" element={
+              <ProtectedRoute permissions={['procedure.view', 'procedure.*']} any>
+                <Procedures />
+              </ProtectedRoute>
+            } />
+            <Route path="/doctors/new" element={
+              <ProtectedRoute permissions={['doctor.create', 'doctor.*']} any>
+                <DoctorForm />
+              </ProtectedRoute>
+            } />
+            <Route path="/doctors/:id" element={
+              <ProtectedRoute permissions={['doctor.view', 'doctor.update', 'doctor.*']} any>
+                <DoctorForm />
+              </ProtectedRoute>
+            } />
+            <Route path="/doctors" element={
+              <ProtectedRoute permissions={['doctor.view', 'doctor.*']} any>
+                <Doctors />
+              </ProtectedRoute>
+            } />
+            <Route path="/mappings/new" element={
+              <ProtectedRoute permissions={['mapping.create', 'mapping.*']} any>
+                <MappingForm />
+              </ProtectedRoute>
+            } />
+            <Route path="/mappings/:id" element={
+              <ProtectedRoute permissions={['mapping.view', 'mapping.update', 'mapping.*']} any>
+                <MappingForm />
+              </ProtectedRoute>
+            } />
+            <Route path="/mappings" element={
+              <ProtectedRoute permissions={['mapping.view', 'mapping.*']} any>
+                <Mappings />
+              </ProtectedRoute>
+            } />
+            <Route path="/external-systems-docs/new" element={
+              <ProtectedRoute permissions={['external_system:manage', '*']} any>
+                <ExternalSystemDocForm />
+              </ProtectedRoute>
+            } />
+            <Route path="/external-systems-docs/:id" element={
+              <ProtectedRoute permissions={['external_system:read', 'external_system:manage', '*']} any>
+                <ExternalSystemDocForm />
+              </ProtectedRoute>
+            } />
+            <Route path="/external-systems-docs" element={
+              <ProtectedRoute permissions={['external_system:read', '*']} any>
+                <ExternalSystemsDocs />
+              </ProtectedRoute>
+            } />
+            <Route path="/modalities" element={
+              <ProtectedRoute permissions={['modality.manage', 'modality.view']} any>
+                <Modalities />
+              </ProtectedRoute>
+            } />
+            <Route path="/dicom-nodes" element={
+              <ProtectedRoute permissions={['node.manage', 'node.view']} any>
+                <DicomNodes />
+              </ProtectedRoute>
+            } />
+            {/* <Route path="/users" element={
+            <ProtectedRoute permissions={['user.manage','user.view']} any>
+              <Users />
+            </ProtectedRoute>
+          } /> */}
+            <Route path="/users" element={
+              <ProtectedRoute permissions={['user:manage', 'user:read', '*']} any>
+                <UserManagement />
+              </ProtectedRoute>
+            } />
+            <Route path="/roles" element={
+              <ProtectedRoute permissions={['user:manage', 'user:read', '*']} any>
+                <RolesManagement />
+              </ProtectedRoute>
+            } />
+            <Route path="/permissions" element={
+              <ProtectedRoute permissions={['user:manage', 'user:read', '*']} any>
+                <PermissionsManagement />
+              </ProtectedRoute>
+            } />
+            {/* <Route path="/audit-logs" element={
+            <ProtectedRoute permissions={['audit.view']}>
+              <AuditLogs />
+            </ProtectedRoute>
+          } /> */}
+            <Route path="/auth-audit-logs" element={
+              <ProtectedRoute permissions={['audit.view', '*']} any>
+                <AuthAuditLogs />
+              </ProtectedRoute>
+            } />
+            <Route path="/audit-logs" element={
+              <ProtectedRoute permissions={['audit.view', '*']} any>
+                <EnhancedAuditLogs />
+              </ProtectedRoute>
+            } />
+            <Route path="/storage-management" element={
+              <ProtectedRoute permissions={['storage.manage', '*']} any>
+                <StorageLifecycleManagement />
+              </ProtectedRoute>
+            } />
+            <Route path="/integration-monitor" element={
+              <ProtectedRoute permissions={['integration.view', '*']} any>
+                <IntegrationMonitor />
+              </ProtectedRoute>
+            } />
+            <Route path="/settings" element={<Settings />} />
+            <Route path="/settings/reports" element={<ReportSettings />} />
+            <Route path="/debug-storage" element={<DebugStorage />} />
+            <Route path="/dicom-viewer" element={<DicomViewer />} />
+            <Route path="/dicom-viewer-demo" element={<DicomViewerDemo />} />
+            <Route path="/dicom-uid-generator" element={<DicomUidGenerator />} />
+            <Route path="/dicom-upload" element={
+              <ProtectedRoute permissions={['studies.upload', 'study.*']} any>
+                <DicomUpload />
+              </ProtectedRoute>
+            } />
+            <Route path="/study/:studyId" element={
+              <ProtectedRoute permissions={['study.view', 'study.*']} any>
+                <StudyDetail />
+              </ProtectedRoute>
+            } />
+            <Route path="/viewer/enhanced/:studyId" element={
+              <ProtectedRoute permissions={['study.view', 'study.*']} any>
+                <DicomViewer />
+              </ProtectedRoute>
+            } />
+            <Route path="/viewer/clean/:studyId" element={
+              <ProtectedRoute permissions={['study.view', 'study.*']} any>
+                <DicomViewerClean />
+              </ProtectedRoute>
+            } />
+            <Route path="/report/:studyId" element={
+              <ProtectedRoute permissions={['report.create', 'report.*']} any>
+                <ReportEditor />
+              </ProtectedRoute>
+            } />
+            <Route path="*" element={<NotFound />} />
+          </Route>
+        </Routes>
+      </Suspense>
+    </ToastProvider>
+  )
+}

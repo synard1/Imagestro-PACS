@@ -1,0 +1,379 @@
+﻿version: '3.8'
+
+services:
+  # ============================================================================
+  # Authentication Service - INTERNAL ONLY
+  # ============================================================================
+  auth-service:
+    build:
+      context: ./auth-service
+      dockerfile: Dockerfile
+    container_name: auth-service
+    environment:
+      POSTGRES_HOST: 172.28.0.1
+      POSTGRES_DB: ${POSTGRES_DB:-worklist_db}
+      POSTGRES_USER: ${POSTGRES_USER:-dicom}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dicom123}
+      POSTGRES_PORT: 5433
+      JWT_SECRET: ${JWT_SECRET:-e665d53ba3f71313a7fc60b24cd17cb4dc7ba53df1846b544d27c99d5a2ab79d}
+      JWT_ALGORITHM: HS256
+      JWT_EXPIRATION_HOURS: ${JWT_EXPIRATION_HOURS:-24}
+      REFRESH_TOKEN_DAYS: ${REFRESH_TOKEN_DAYS:-30}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin@12345}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@hospital.local}
+      PYTHONUNBUFFERED: "1"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      TZ: ${TZ}
+      ENABLE_MODALITY_SIMULATOR: ${ENABLE_MODALITY_SIMULATOR:-false}
+      ENABLE_SIMRS_BRIDGE: ${ENABLE_SIMRS_BRIDGE:-true}
+      GENERATE_DUMMY_USERS: ${GENERATE_DUMMY_USERS:-false}
+      DUMMY_USERS_COUNT: ${DUMMY_USERS_COUNT:-32}
+      DUMMY_USERS_RESET: ${DUMMY_USERS_RESET:-false}
+    volumes:
+      - auth-logs:/var/log/auth
+      - /etc/localtime:/etc/localtime:ro
+    networks:
+      - secure-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ============================================================================
+  # SATUSEHAT Integrator Service - INTERNAL ONLY
+  # ============================================================================
+  satusehat-integrator:
+    build: ./satusehat-integrator
+    container_name: satusehat-integrator
+    working_dir: /app
+    command: bun run start
+    environment:
+      TZ: ${TZ}
+      PORT: 8081
+      SATUSEHAT_URL: ${SATUSEHAT_URL}
+      FHIR_BASE: ${FHIR_BASE:-/fhir-r4/v1}
+      OAUTH_PATH: ${OAUTH_PATH:-/oauth2/v1/accesstoken}
+      CLIENT_ID: ${CLIENT_ID}
+      CLIENT_SECRET: ${CLIENT_SECRET}
+      ORG_ID: ${ORG_ID}
+      ACSN_SYSTEM_BASE: ${ACSN_SYSTEM_BASE}
+      IMG_ACSN_SYSTEM_BASE: ${IMG_ACSN_SYSTEM_BASE:-${ACSN_SYSTEM_BASE}}
+      ENCOUNTER_SYSTEM_BASE: ${ENCOUNTER_SYSTEM_BASE:-http://sys-ids.kemkes.go.id/encounter}
+      ORTHANC_URL: http://orthanc:8042
+      ORTHANC_USERNAME: ${ORTHANC_USERNAME:-orthanc}
+      ORTHANC_PASSWORD: ${ORTHANC_PASSWORD:-orthanc}
+      PGHOST: 172.28.0.1
+      PGPORT: 5433
+      PGUSER: ${POSTGRES_USER:-dicom}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-dicom123}
+      PGDATABASE: ${POSTGRES_DB:-worklist_db}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - ./satusehat-integrator:/app
+      - /etc/localtime:/etc/localtime:ro
+    expose:
+      - "8081"
+    networks:
+      - secure-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8081/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ============================================================================
+  # API Gateway - SINGLE ENTRY POINT
+  # ============================================================================
+  api-gateway:
+    image: python:3.12-slim
+    container_name: api-gateway
+    working_dir: /app
+    command: >
+      sh -c "set -e;
+        apt-get update && apt-get install -y --no-install-recommends gosu curl &&
+        grep -q \"^appuser:\" /etc/passwd || adduser --system --no-create-home --uid 1001 appuser &&
+        pip install --no-cache-dir --quiet --upgrade pip &&
+        pip install --no-cache-dir --quiet flask==3.0.0 flask-cors==4.0.0 PyJWT==2.8.0 requests==2.31.0 flask-limiter==3.5.0 gunicorn==22.0.0 &&
+        chown -R appuser /app &&
+        gosu appuser gunicorn --bind 0.0.0.0:8888 --workers 4 --chdir /app api_gateway:app
+      "
+    environment:
+      AUTH_SERVICE_URL: http://auth-service:5000
+      MWL_SERVICE_URL: http://mwl-writer:8000
+      MWL_UI_SERVICE_URL: http://mwl-ui:8000
+      ORTHANC_SERVICE_URL: http://orthanc-proxy:8043
+      ORDER_SERVICE_URL: http://order-management:8001
+      ORTHANC_WEB_URL: http://orthanc:8042
+      MASTER_DATA_SERVICE_URL: http://master-data-service:8002
+      JWT_SECRET: ${JWT_SECRET:-e665d53ba3f71313a7fc60b24cd17cb4dc7ba53df1846b544d27c99d5a2ab79d}
+      JWT_ALGORITHM: HS256
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-60}
+      RATE_LIMIT_PER_HOUR: ${RATE_LIMIT_PER_HOUR:-1000}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:8080}
+      PYTHONUNBUFFERED: "1"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      TZ: ${TZ}
+      ENABLE_MODALITY_SIMULATOR: ${ENABLE_MODALITY_SIMULATOR:-false}
+      ENABLE_SIMRS_BRIDGE: ${ENABLE_SIMRS_BRIDGE:-true}
+      SATUSEHAT_INTEGRATOR_URL: http://satusehat-integrator:8081
+    volumes:
+      - ./api-gateway:/app
+      - gateway-logs:/var/log/gateway
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - "8888:8888"
+    networks:
+      - secure-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8888/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================================================
+  # Orthanc DICOM Server
+  # ============================================================================
+  orthanc:
+    build: ./images/orthanc
+    container_name: orthanc-secured
+    hostname: orthanc
+    environment:
+      ORTHANC_NAME: "Orthanc DICOM Server (Secured)"
+      ORTHANC_WEB_ENABLED: "true"
+      ORTHANC_AUTHENTICATION_ENABLED: "true"
+      ORTHANC_REGISTERED_USERS: |
+        {
+          "${ORTHANC_USERNAME:-orthanc}": "${ORTHANC_PASSWORD:-orthanc}"
+        }
+      ORTHANC_POSTGRESQL_ENABLED: "true"
+      ORTHANC_POSTGRESQL_HOST: 172.28.0.1
+      ORTHANC_POSTGRESQL_PORT: 5433
+      ORTHANC_POSTGRESQL_DATABASE: ${ORTHANC_DB:-orthanc}
+      ORTHANC_POSTGRESQL_USERNAME: ${ORTHANC_USER:-orthanc}
+      ORTHANC_POSTGRESQL_PASSWORD: ${ORTHANC_PASSWORD:-orthanc123}
+      ORTHANC_WORKLISTS_ENABLED: "true"
+      ORTHANC_DICOM_AET: ${ORTHANC_AET:-ORTHANC}
+      ORTHANC_DICOM_PORT: 4242
+      ORTHANC_STORAGE_DIRECTORY: "/var/lib/orthanc/db"
+      TZ: ${TZ}
+    volumes:
+      - orthanc_storage:/var/lib/orthanc/db
+      - worklists:/worklists
+      - ./orthanc-config/orthanc.json:/etc/orthanc/orthanc.json:ro
+      - ./lua:/lua:ro
+      - /etc/localtime:/etc/localtime:ro
+    expose:
+      - "8042"
+      - "4242"
+    networks:
+      - secure-network
+    restart: unless-stopped
+
+  # ============================================================================
+  # MWL Writer Service
+  # ============================================================================
+  mwl-writer:
+    image: python:3.12-slim
+    container_name: mwl-writer-secured
+    working_dir: /app
+    command: >
+      sh -c "
+        apt-get update && apt-get install -y --no-install-recommends gosu curl &&
+        grep -q \"^appuser:\" /etc/passwd || adduser --system --no-create-home --uid 1001 appuser &&
+        pip install --no-cache-dir --quiet --upgrade pip &&
+        pip install --no-cache-dir --quiet pydicom==3.0.1 flask==3.0.0 flask-cors==4.0.0 psycopg2-binary==2.9.9 PyJWT==2.8.0 gunicorn==22.0.0 &&
+        chown -R appuser /app &&
+        gosu appuser gunicorn --bind 0.0.0.0:8000 --workers 4 --chdir /app mwl_writer_secured:app
+      "
+    environment:
+      TZ: ${TZ}
+      POSTGRES_HOST: 172.28.0.1
+      POSTGRES_DB: ${POSTGRES_DB:-worklist_db}
+      POSTGRES_USER: ${POSTGRES_USER:-dicom}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dicom123}
+      POSTGRES_PORT: 5433
+      JWT_SECRET: ${JWT_SECRET:-e665d53ba3f71313a7fc60b24cd17cb4dc7ba53df1846b544d27c99d5a2ab79d}
+      JWT_ALGORITHM: HS256
+      PYTHONUNBUFFERED: "1"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - ./mwl-writer:/app
+      - worklists:/worklists
+      - mwl-logs:/var/log/mwl
+      - /etc/localtime:/etc/localtime:ro
+    networks:
+      - secure-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================================================
+  # Order Management Service
+  # ============================================================================
+  order-management:
+    image: python:3.12-slim
+    container_name: order-management
+    working_dir: /app
+    command: sh -c "pip install --no-cache-dir -r requirements.txt && python -u order_management_service.py"
+    environment:
+      POSTGRES_HOST: 172.28.0.1
+      POSTGRES_DB: worklist_db
+      POSTGRES_USER: dicom
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dicom123}
+      POSTGRES_PORT: 5433
+      MWL_SERVICE_URL: http://mwl-writer:8000
+      SATUSEHAT_BASE_URL: ${SATUSEHAT_BASE_URL:-https://api-satusehat-stg.dto.kemkes.go.id}
+      SATUSEHAT_CLIENT_ID: ${SATUSEHAT_CLIENT_ID}
+      SATUSEHAT_CLIENT_SECRET: ${SATUSEHAT_CLIENT_SECRET}
+      SATUSEHAT_ORGANIZATION_ID: ${SATUSEHAT_ORGANIZATION_ID:-100000001}
+      ACSN_SYSTEM_BASE: ${ACSN_SYSTEM_BASE:-http://sys-ids.kemkes.go.id/accessionno}
+      ACCESSION_API_URL: ${ACCESSION_API_URL:-http://accession-api:8180}
+      ORDER_NUMBER_PREFIX: ${ORDER_NUMBER_PREFIX:-ORD}
+      ORDER_NUMBER_RESET: ${ORDER_NUMBER_RESET:-daily}
+      ORDER_NUMBER_PAD_LENGTH: ${ORDER_NUMBER_PAD_LENGTH:-5}
+      MWL_STATION_AET: \
+      JWT_SECRET: e665d53ba3f71313a7fc60b24cd17cb4dc7ba53df1846b544d27c99d5a2ab79d
+      JWT_ALGORITHM: HS256
+      PYTHONUNBUFFERED: "1"
+      TZ: ${TZ}
+    volumes:
+      - ./order-management:/app
+      - /etc/localtime:/etc/localtime:ro
+    networks:
+      - secure-network
+    restart: unless-stopped
+
+  # ============================================================================
+  # Master Data Service
+  # ============================================================================
+  master-data-service:
+    build: ./master-data-service
+    container_name: master-data-service
+    working_dir: /app
+    environment:
+      TZ: ${TZ}
+      POSTGRES_HOST: 172.28.0.1
+      POSTGRES_DB: ${POSTGRES_DB:-worklist_db}
+      POSTGRES_USER: ${POSTGRES_USER:-dicom}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dicom123}
+      POSTGRES_PORT: 5433
+      JWT_SECRET: ${JWT_SECRET:-e665d53ba3f71313a7fc60b24cd17cb4dc7ba53df1846b544d27c99d5a2ab79d}
+      JWT_ALGORITHM: HS256
+      PYTHONUNBUFFERED: "1"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - ./master-data-service:/app
+      - /etc/localtime:/etc/localtime:ro
+    networks:
+      - secure-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ============================================================================
+  # Accession API Service
+  # ============================================================================
+  accession-api:
+    build: ./accession-api
+    container_name: accession-api
+    working_dir: /app
+    command: bun run start
+    environment:
+      TZ: ${TZ}
+      PORT: 8180
+      PGHOST: 172.28.0.1
+      PGPORT: 5433
+      PGUSER: ${POSTGRES_USER:-dicom}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-dicom123}
+      PGDATABASE: ${POSTGRES_DB:-worklist_db}
+    volumes:
+      - ./accession-api:/app
+      - /etc/localtime:/etc/localtime:ro
+    networks:
+      - secure-network
+    restart: unless-stopped
+
+  # ============================================================================
+  # MWL UI Service
+  # ============================================================================
+  mwl-ui:
+    build:
+      context: ./mwl-ui
+      dockerfile: Dockerfile
+    container_name: mwl-ui
+    working_dir: /app
+    environment:
+      TZ: ${TZ}
+      POSTGRES_HOST: 172.28.0.1
+      POSTGRES_PORT: 5433
+      POSTGRES_DB: ${POSTGRES_DB:-worklist_db}
+      POSTGRES_USER: ${POSTGRES_USER:-dicom}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dicom123}
+      GATEWAY_BASE: http://api-gateway:8888
+      JWT_SECRET: ${JWT_SECRET:-e665d53ba3f71313a7fc60b24cd17cb4dc7ba53df1846b544d27c99d5a2ab79d}
+      JWT_ALGORITHM: HS256
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ./mwl-ui:/app
+      - mwl-ui-logs:/app/logs
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - "8096:8000"
+    networks:
+      - secure-network
+    restart: unless-stopped
+
+# ==============================================================================
+# VOLUMES
+# ==============================================================================
+volumes:
+  orthanc_storage:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data/orthanc
+  worklists:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data/worklists
+  dicom_files:
+    driver: local
+  auth-logs:
+    driver: local
+  gateway-logs:
+    driver: local
+  mwl-logs:
+    driver: local
+  mwl-ui-logs:
+    driver: local
+
+# ==============================================================================
+# NETWORKS
+# ==============================================================================
+networks:
+  secure-network:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.28.0.0/16
+          gateway: 172.28.0.1
+    driver_opts:
+      com.docker.network.bridge.name: br-dicom-secure
+      com.docker.network.bridge.enable_ip_masquerade: "true"

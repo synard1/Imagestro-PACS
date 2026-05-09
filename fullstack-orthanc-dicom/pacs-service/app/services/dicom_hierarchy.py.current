@@ -1,0 +1,211 @@
+"""
+DICOM Hierarchy Service
+Creates Study → Series → Instance hierarchy
+"""
+
+import logging
+from datetime import datetime
+from sqlalchemy.orm import Session
+from pydicom import Dataset
+
+from app.models.study import Study
+from app.models.series import Series
+from app.models.instance import Instance
+
+logger = logging.getLogger(__name__)
+
+
+def create_or_get_study(db: Session, ds: Dataset) -> Study:
+    """
+    Create or get existing study - BULLETPROOF FK handling
+    """
+    study_uid = str(ds.StudyInstanceUID)
+    
+    # Check if study exists
+    study = db.query(Study).filter(Study.study_instance_uid == study_uid).first()
+    if study:
+        logger.debug(f"Study exists: {study_uid}")
+        return study
+    
+    # MINIMAL STUDY - ONLY non-FK fields to avoid constraints
+    minimal_fields = {
+        'study_instance_uid': study_uid,
+        'patient_name': str(getattr(ds, 'PatientName', '')),
+        'study_date': getattr(ds, 'StudyDate', None),
+        'study_time': getattr(ds, 'StudyTime', None),
+        'study_description': getattr(ds, 'StudyDescription', ''),
+        'accession_number': getattr(ds, 'AccessionNumber', None),
+        'study_id': getattr(ds, 'StudyID', None),
+        'referring_physician': str(getattr(ds, 'ReferringPhysicianName', '')),
+        'modality': getattr(ds, 'Modality', None),
+    }
+    
+    try:
+        # Create with safe fields only
+        study = Study(**minimal_fields)
+        db.add(study)
+        db.flush()  # Test immediately
+        
+        # Add optional FK fields SAFELY after base record exists
+        try:
+            if getattr(ds, 'PatientBirthDate', None):
+                study.patient_birth_date = getattr(ds, 'PatientBirthDate')
+            if getattr(ds, 'PatientSex', None):
+                study.patient_sex = getattr(ds, 'PatientSex')
+            db.flush()  # Test optional fields
+        except:
+            logger.warning("Optional patient fields skipped (FK constraints)")
+            
+        logger.info(f"✅ Study created safely: {study_uid}")
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"❌ Minimal study failed: {e}")
+        # ULTIMATE FALLBACK - raw SQL insert
+        try:
+            db.execute(
+                "INSERT INTO pacs_studies (study_instance_uid, patient_name, modality, created_at) "
+                "VALUES (:uid, :name, :modality, NOW()) "
+                "ON CONFLICT (study_instance_uid) DO NOTHING",
+                {"uid": study_uid, "name": str(getattr(ds, 'PatientName', '')), "modality": getattr(ds, 'Modality', 'OT')}
+            )
+            db.commit()
+            study = db.query(Study).filter(Study.study_instance_uid == study_uid).first()
+            logger.info(f"✅ SQL fallback Study: {study_uid}")
+        except Exception as sql_error:
+            logger.error(f"❌ SQL fallback failed: {sql_error}")
+            raise
+    
+    return study
+    
+    db.add(study)
+    db.flush()  # Get ID without committing
+    
+    logger.info(f"Created study: {study_uid}")
+    return study
+
+
+def create_or_get_series(db: Session, ds: Dataset, study: Study) -> Series:
+    """
+    Create or get existing series
+    
+    Args:
+        db: Database session
+        ds: DICOM dataset
+        study: Parent study
+        
+    Returns:
+        Series object
+    """
+    series_uid = str(ds.SeriesInstanceUID)
+    
+    # Check if series exists
+    series = db.query(Series).filter(Series.series_instance_uid == series_uid).first()
+    
+    if series:
+        logger.debug(f"Series already exists: {series_uid}")
+        return series
+    
+    # Create new series
+    series = Series(
+        series_instance_uid=series_uid,
+        study_id=study.id,
+        series_number=getattr(ds, 'SeriesNumber', None),
+        series_description=getattr(ds, 'SeriesDescription', None),
+        modality=getattr(ds, 'Modality', None),
+        body_part_examined=getattr(ds, 'BodyPartExamined', None),
+        series_date=getattr(ds, 'SeriesDate', None),
+        series_time=getattr(ds, 'SeriesTime', None),
+        performing_physician=str(getattr(ds, 'PerformingPhysicianName', '')),
+    )
+    
+    db.add(series)
+    db.flush()
+    
+    logger.info(f"Created series: {series_uid}")
+    return series
+
+
+def create_or_get_instance(db: Session, ds: Dataset, series: Series) -> Instance:
+    """
+    Create or get existing instance
+    
+    Args:
+        db: Database session
+        ds: DICOM dataset
+        series: Parent series
+        
+    Returns:
+        Instance object
+    """
+    instance_uid = str(ds.SOPInstanceUID)
+    
+    # Check if instance exists
+    instance = db.query(Instance).filter(Instance.sop_instance_uid == instance_uid).first()
+    
+    if instance:
+        logger.debug(f"Instance already exists: {instance_uid}")
+        return instance
+    
+    # Create new instance
+    instance = Instance(
+        sop_instance_uid=instance_uid,
+        sop_class_uid=str(ds.SOPClassUID),
+        series_id=series.id,
+        instance_number=getattr(ds, 'InstanceNumber', None),
+        content_date=getattr(ds, 'ContentDate', None),
+        content_time=getattr(ds, 'ContentTime', None),
+        acquisition_date=getattr(ds, 'AcquisitionDate', None),
+        acquisition_time=getattr(ds, 'AcquisitionTime', None),
+        rows=getattr(ds, 'Rows', None),
+        columns=getattr(ds, 'Columns', None),
+        bits_allocated=getattr(ds, 'BitsAllocated', None),
+        bits_stored=getattr(ds, 'BitsStored', None),
+        number_of_frames=int(getattr(ds, 'NumberOfFrames', 1)),
+        transfer_syntax_uid=str(ds.file_meta.TransferSyntaxUID) if hasattr(ds, 'file_meta') else None,
+    )
+    
+    db.add(instance)
+    db.flush()
+    
+    logger.info(f"Created instance: {instance_uid}")
+    return instance
+
+
+def store_dicom_hierarchy(db: Session, ds: Dataset) -> dict:
+    """
+    Store DICOM with proper hierarchy (Study → Series → Instance)
+    
+    Args:
+        db: Database session
+        ds: DICOM dataset
+        
+    Returns:
+        dict with study_id, series_id, instance_id
+    """
+    try:
+        # Create hierarchy
+        study = create_or_get_study(db, ds)
+        series = create_or_get_series(db, ds, study)
+        instance = create_or_get_instance(db, ds, series)
+        
+        # Commit all
+        db.commit()
+        
+        return {
+            "success": True,
+            "study_id": study.id,
+            "series_id": series.id,
+            "instance_id": instance.id,
+            "study_uid": study.study_instance_uid,
+            "series_uid": series.series_instance_uid,
+            "instance_uid": instance.sop_instance_uid,
+        }
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to store DICOM hierarchy: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e)
+        }

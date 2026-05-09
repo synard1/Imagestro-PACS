@@ -1,0 +1,26 @@
+name = "api-gateway-v2"
+main = "./src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = [ "nodejs_compat" ]
+
+[vars]
+DATABASE_URL = "postgresql://user:password@localhost:5432/dbname"
+AUTH_SERVICE_URL = "http://auth-service:5000"
+MASTER_DATA_SERVICE_URL = "http://master-data-service:8002"
+ORDER_MANAGEMENT_SERVICE_URL = "http://order-management-service:8001"
+MWL_WRITER_SERVICE_URL = "http://mwl-writer-service:8000"
+
+[[kv_namespaces]]
+binding = "API_CACHE"
+id = "your_kv_namespace_id"
+
+[[services.dns]]
+binding = "OUTBOUND_DNS"
+service = "fathom"
+
+[upload.formats]
+uploaded = [{ glob = "dist/**" }]
+
+[[site]]
+bucket = "./public"
+entry-point = "workers-site"

@@ -1,0 +1,45 @@
+# Environment files
+.env
+*.env
+!.env.example
+
+# Credentials
+CREDENTIALS.txt
+*.key
+*.pem
+*.p12
+
+# Data directories
+data/
+logs/
+*.log
+
+# Backups
+*.sql
+*.dump
+*.gz
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+
+# Docker
+docker-compose.override.yml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Archive (backups and archived files) - keep folder but ignore contents
+archive/

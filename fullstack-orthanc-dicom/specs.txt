@@ -1,0 +1,269 @@
+Linux aizen.satupintudigital.id 6.12.0-55.37.1.el10_0.x86_64 #1 SMP PREEMPT_DYNAMIC Thu Oct  2 09:39:49 EDT 2025 x86_64 GNU/Linux
+
+CPU:
+Architecture:                         x86_64
+CPU op-mode(s):                       32-bit, 64-bit
+Address sizes:                        46 bits physical, 48 bits virtual
+Byte Order:                           Little Endian
+CPU(s):                               8
+On-line CPU(s) list:                  0-7
+Vendor ID:                            GenuineIntel
+BIOS Vendor ID:                       QEMU
+Model name:                           Intel(R) Xeon(R) CPU E5-2690 v4 @ 2.60GHz
+BIOS Model name:                      pc-i440fx-10.0  CPU @ 2.0GHz
+BIOS CPU family:                      1
+CPU family:                           6
+Model:                                79
+Thread(s) per core:                   1
+Core(s) per socket:                   4
+Socket(s):                            2
+Stepping:                             1
+BogoMIPS:                             5193.98
+Flags:                                fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ss ht syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon rep_good nopl xtopology cpuid tsc_known_freq pni pclmulqdq vmx ssse3 fma cx16 pdcm pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand hypervisor lahf_lm abm 3dnowprefetch cpuid_fault pti ssbd ibrs ibpb stibp tpr_shadow flexpriority ept vpid ept_ad fsgsbase tsc_adjust bmi1 hle avx2 smep bmi2 erms invpcid rtm rdseed adx smap xsaveopt arat vnmi umip md_clear flush_l1d arch_capabilities
+Virtualization:                       VT-x
+Hypervisor vendor:                    KVM
+Virtualization type:                  full
+L1d cache:                            256 KiB (8 instances)
+L1i cache:                            256 KiB (8 instances)
+L2 cache:                             32 MiB (8 instances)
+L3 cache:                             32 MiB (2 instances)
+NUMA node(s):                         1
+NUMA node0 CPU(s):                    0-7
+Vulnerability Gather data sampling:   Not affected
+Vulnerability Itlb multihit:          Not affected
+Vulnerability L1tf:                   Mitigation; PTE Inversion; VMX flush not necessary, SMT disabled
+Vulnerability Mds:                    Mitigation; Clear CPU buffers; SMT Host state unknown
+Vulnerability Meltdown:               Mitigation; PTI
+Vulnerability Mmio stale data:        Mitigation; Clear CPU buffers; SMT Host state unknown
+Vulnerability Reg file data sampling: Not affected
+Vulnerability Retbleed:               Not affected
+Vulnerability Spec rstack overflow:   Not affected
+Vulnerability Spec store bypass:      Mitigation; Speculative Store Bypass disabled via prctl
+Vulnerability Spectre v1:             Mitigation; usercopy/swapgs barriers and __user pointer sanitization
+Vulnerability Spectre v2:             Mitigation; Retpolines; IBPB conditional; IBRS_FW; STIBP disabled; RSB filling; PBRSB-eIBRS Not affected; BHI Retpoline
+Vulnerability Srbds:                  Not affected
+Vulnerability Tsx async abort:        Mitigation; Clear CPU buffers; SMT Host state unknown
+
+Memory:
+               total        used        free      shared  buff/cache   available
+Mem:            15Gi       5.2Gi       671Mi       669Mi        10Gi        10Gi
+Swap:          7.9Gi          0B       7.9Gi
+
+Disk usage:
+Filesystem                  Size  Used Avail Use% Mounted on
+/dev/mapper/almalinux-root   70G   27G   44G  38% /
+devtmpfs                    4.0M     0  4.0M   0% /dev
+tmpfs                       7.7G     0  7.7G   0% /dev/shm
+tmpfs                       3.1G  331M  2.8G  11% /run
+tmpfs                       1.0M     0  1.0M   0% /run/credentials/systemd-journald.service
+/dev/sda2                   960M  307M  654M  32% /boot
+/dev/mapper/almalinux-home   72G  1.8G   70G   3% /home
+tmpfs                       1.0M     0  1.0M   0% /run/credentials/getty@tty1.service
+overlay                      70G   27G   44G  38% /var/lib/docker/overlay2/07711f98986fd10e62ff14313df388ac2da45126091ef05e665c4c5cc8a5873c/merged
+overlay                      70G   27G   44G  38% /var/lib/docker/overlay2/667396e2fc7ac2205e0887cd307c425c2f14f6d1c64eab2ad3c6826fabe055ed/merged
+overlay                      70G   27G   44G  38% /var/lib/docker/overlay2/f3e51f590da7712191b522103d50547e081d9eb760869794b8243ca59468e01e/merged
+overlay                      70G   27G   44G  38% /var/lib/docker/overlay2/e3e3a908c442f799bbc80bcfb8f88b803a6af5660d415e0fdb4bc43e7dbc40fd/merged
+overlay                      70G   27G   44G  38% /var/lib/docker/overlay2/26b87572df56b28294e18e45b6053b1ed89e52178bdcf8cfe0e9ad267ebd5242/merged
+overlay                      70G   27G   44G  38% /var/lib/docker/overlay2/f37ca5044b281c254efad681d5c2f265edbe89a09288bad07e24e79b2598251b/merged
+overlay                      70G   27G   44G  38% /var/lib/docker/overlay2/a776d6a51b90ba2c5eaed1d5475cd956494a47d5f8ea227d07f86bb5d42d81a7/merged
+overlay                      70G   27G   44G  38% /var/lib/docker/overlay2/f1d56df5fca3b6eff6482568b7286f650a6e9420712e5bdc1a63afafe93cc5fc/merged
+overlay                      70G   27G   44G  38% /var/lib/docker/overlay2/5366dd7b5d7c7a87158e1afb0b11655f321d4b76813c946cf7727abd18fb1f70/merged
+overlay                      70G   27G   44G  38% /var/lib/docker/overlay2/da609207c29626deab933ad19388b30b3cd0d1950e44fb29fcc321aca5dd17eb/merged
+overlay                      70G   27G   44G  38% /var/lib/docker/overlay2/73037423b8c113d388a7b62ba7e06c07c44b35370ca87342b0295e0c9dc9eecc/merged
+overlay                      70G   27G   44G  38% /var/lib/docker/overlay2/eb5baac240a5d3d747f15c279f65e6dc2321a925be4c1038e87d2e45207d7334/merged
+overlay                      70G   27G   44G  38% /var/lib/docker/overlay2/02572d908e7f0c936ac359e871b3644d3591b4c566324d2a6e7dbe0d94e72887/merged
+overlay                      70G   27G   44G  38% /var/lib/docker/overlay2/6c3f4d7c5d5123cb1c7bcc8175b64de465fda74cfb5f61e1ee785096ce5c2474/merged
+overlay                      70G   27G   44G  38% /var/lib/docker/overlay2/3e2eba79dd2d70ca4f1b0498b09c68be7a7ef6fee8892227c4c8fad3ce38464e/merged
+overlay                      70G   27G   44G  38% /var/lib/docker/overlay2/b37f79470f801a7369193ae306e9bd80645cedff329c3dff5b6d56b89536070d/merged
+overlay                      70G   27G   44G  38% /var/lib/docker/overlay2/2995f143c0978fb1c44797de11e8cba7c3b35c837a5e06852e696116e720b997/merged
+overlay                      70G   27G   44G  38% /var/lib/docker/overlay2/a62c774981e3c86a4e8564a51d7ee384720f01cc2c3481b92daec482218ffc57/merged
+overlay                      70G   27G   44G  38% /var/lib/docker/overlay2/84a39e2ce4a7e870dec61a4507e798443be7a234e6c66bf92096a7c2d23d8884/merged
+overlay                      70G   27G   44G  38% /var/lib/docker/overlay2/8c372d4bc3116c67c809e88dc1f195b9c10a77f7417939a935201b63ab535caa/merged
+overlay                      70G   27G   44G  38% /var/lib/docker/overlay2/6f7fafdf80c60d71815937b20c1611310961cae7434cc0e41718c385e92a3c3f/merged
+overlay                      70G   27G   44G  38% /var/lib/docker/overlay2/9a189640f3a0bea918dc31cec119324ad4383f7d581a9e099e4543553ad9a50e/merged
+overlay                      70G   27G   44G  38% /var/lib/docker/overlay2/bf2a762850d327a38c9f1f6c614c27ecbd259882e68dcab212981f2eaea8010f/merged
+overlay                      70G   27G   44G  38% /var/lib/docker/overlay2/7bf24adb3839dddad346797f5d3f3a09f8e78b2e0e47c90f613242781f709f04/merged
+overlay                      70G   27G   44G  38% /var/lib/docker/overlay2/fd9f7bcbd0115ca7eb2879b7c150c8cdf86b8809804744faf4c3e315c179eb77/merged
+overlay                      70G   27G   44G  38% /var/lib/docker/overlay2/9763ab4f505fc30c1c35b6398ae93704f30e8764fec0233b113f57e2d0186e6f/merged
+overlay                      70G   27G   44G  38% /var/lib/docker/overlay2/e6f1ce72a6a8e9355491394d4784cfb98d4ed9dd1154877407429c29794b1b82/merged
+overlay                      70G   27G   44G  38% /var/lib/docker/overlay2/65f8c3e6db57536c3fcd12c0379b1ca2205f84740bd2c501fb4a5778e930ceb1/merged
+overlay                      70G   27G   44G  38% /var/lib/docker/overlay2/3acfa8f436134bf88ab32b2762622a50754940a9eed28534dad9e39362772128/merged
+overlay                      70G   27G   44G  38% /var/lib/docker/overlay2/89d483ab4ed8e0f1405c0040f578bcbedd24ada4de8cd0ec5bfe077f071683ed/merged
+overlay                      70G   27G   44G  38% /var/lib/docker/overlay2/e3577ea25fd7a9c9bd241ef41ac48536da847353ae94c3b94a0d4bf1fa74ee1c/merged
+tmpfs                       1.6G  4.0K  1.6G   1% /run/user/0
+
+Network interfaces:
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+    inet6 ::1/128 scope host noprefixroute 
+       valid_lft forever preferred_lft forever
+2: ens18: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UP group default qlen 1000
+    link/ether bc:24:11:8a:97:41 brd ff:ff:ff:ff:ff:ff
+    altname enp0s18
+    altname enxbc24118a9741
+    inet 172.16.117.9/28 brd 172.16.117.15 scope global dynamic noprefixroute ens18
+       valid_lft 62781sec preferred_lft 62781sec
+    inet6 fe80::be24:11ff:fe8a:9741/64 scope link noprefixroute 
+       valid_lft forever preferred_lft forever
+3: docker0: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 qdisc noqueue state DOWN group default 
+    link/ether 0a:df:85:b4:61:96 brd ff:ff:ff:ff:ff:ff
+    inet 172.17.0.1/16 brd 172.17.255.255 scope global docker0
+       valid_lft forever preferred_lft forever
+    inet6 fe80::8df:85ff:feb4:6196/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+4: br-6d2979e61777: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default 
+    link/ether 92:8d:8b:74:1e:02 brd ff:ff:ff:ff:ff:ff
+    inet 172.25.0.1/16 brd 172.25.255.255 scope global br-6d2979e61777
+       valid_lft forever preferred_lft forever
+    inet6 fe80::908d:8bff:fe74:1e02/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+5: br-c3b31d98265a: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default 
+    link/ether 0e:d5:4b:9b:72:58 brd ff:ff:ff:ff:ff:ff
+    inet 172.22.1.1/24 brd 172.22.1.255 scope global br-c3b31d98265a
+       valid_lft forever preferred_lft forever
+    inet6 fe80::cd5:4bff:fe9b:7258/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+6: br-dicom-secure: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default 
+    link/ether 5a:73:1c:7b:b0:80 brd ff:ff:ff:ff:ff:ff
+    inet 172.28.0.1/16 brd 172.28.255.255 scope global br-dicom-secure
+       valid_lft forever preferred_lft forever
+    inet6 fe80::5873:1cff:fe7b:b080/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+7: br-236f0595740e: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default 
+    link/ether c2:8b:ed:99:45:44 brd ff:ff:ff:ff:ff:ff
+    inet 172.18.0.1/16 brd 172.18.255.255 scope global br-236f0595740e
+       valid_lft forever preferred_lft forever
+    inet6 fe80::c08b:edff:fe99:4544/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+8: veth450d1a2@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br-6d2979e61777 state UP group default 
+    link/ether 4e:d7:50:50:7e:95 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+    inet6 fe80::4cd7:50ff:fe50:7e95/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+9: veth299b154@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br-dicom-secure state UP group default 
+    link/ether d2:e0:15:8a:d1:5f brd ff:ff:ff:ff:ff:ff link-netnsid 1
+    inet6 fe80::d0e0:15ff:fe8a:d15f/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+10: veth861e9d3@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br-c3b31d98265a state UP group default 
+    link/ether a6:18:74:3f:87:2d brd ff:ff:ff:ff:ff:ff link-netnsid 2
+    inet6 fe80::a418:74ff:fe3f:872d/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+11: vethbfc8b7e@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br-dicom-secure state UP group default 
+    link/ether 86:18:b3:62:ea:5e brd ff:ff:ff:ff:ff:ff link-netnsid 3
+    inet6 fe80::8418:b3ff:fe62:ea5e/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+12: veth993bf56@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br-6d2979e61777 state UP group default 
+    link/ether 52:5a:81:a1:85:89 brd ff:ff:ff:ff:ff:ff link-netnsid 4
+    inet6 fe80::505a:81ff:fea1:8589/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+13: vethbf1167c@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br-c3b31d98265a state UP group default 
+    link/ether d6:a1:a9:b0:62:9f brd ff:ff:ff:ff:ff:ff link-netnsid 5
+    inet6 fe80::d4a1:a9ff:feb0:629f/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+14: veth4b06f67@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br-236f0595740e state UP group default 
+    link/ether 22:9f:4b:1b:09:ce brd ff:ff:ff:ff:ff:ff link-netnsid 6
+    inet6 fe80::209f:4bff:fe1b:9ce/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+16: veth02cee36@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br-6d2979e61777 state UP group default 
+    link/ether 4a:38:fb:45:c2:e3 brd ff:ff:ff:ff:ff:ff link-netnsid 8
+    inet6 fe80::4838:fbff:fe45:c2e3/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+17: veth6a3b59f@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br-dicom-secure state UP group default 
+    link/ether 0e:b5:fd:1f:17:da brd ff:ff:ff:ff:ff:ff link-netnsid 9
+    inet6 fe80::cb5:fdff:fe1f:17da/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+18: vethaf6d696@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br-6d2979e61777 state UP group default 
+    link/ether f2:52:53:0e:fc:0b brd ff:ff:ff:ff:ff:ff link-netnsid 10
+    inet6 fe80::f052:53ff:fe0e:fc0b/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+19: veth22d330f@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br-c3b31d98265a state UP group default 
+    link/ether c6:c7:71:3c:cd:aa brd ff:ff:ff:ff:ff:ff link-netnsid 11
+    inet6 fe80::c4c7:71ff:fe3c:cdaa/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+21: vethbe01848@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br-6d2979e61777 state UP group default 
+    link/ether 7e:ef:8d:c9:c8:85 brd ff:ff:ff:ff:ff:ff link-netnsid 13
+    inet6 fe80::7cef:8dff:fec9:c885/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+22: vethc793159@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br-c3b31d98265a state UP group default 
+    link/ether da:bd:89:a9:b2:e5 brd ff:ff:ff:ff:ff:ff link-netnsid 14
+    inet6 fe80::d8bd:89ff:fea9:b2e5/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+24: vethd851db3@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br-6d2979e61777 state UP group default 
+    link/ether 86:2a:cb:bc:cc:fd brd ff:ff:ff:ff:ff:ff link-netnsid 16
+    inet6 fe80::842a:cbff:febc:ccfd/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+26: vethe2bbddb@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br-6d2979e61777 state UP group default 
+    link/ether 4e:2f:cc:03:ba:78 brd ff:ff:ff:ff:ff:ff link-netnsid 18
+    inet6 fe80::4c2f:ccff:fe03:ba78/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+27: veth3c1202a@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br-dicom-secure state UP group default 
+    link/ether 02:b7:82:27:36:14 brd ff:ff:ff:ff:ff:ff link-netnsid 19
+    inet6 fe80::b7:82ff:fe27:3614/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+28: veth4376ddf@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br-6d2979e61777 state UP group default 
+    link/ether 3a:48:84:31:80:9a brd ff:ff:ff:ff:ff:ff link-netnsid 20
+    inet6 fe80::3848:84ff:fe31:809a/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+30: vethf5ebdbf@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br-dicom-secure state UP group default 
+    link/ether 8a:f4:60:d7:c9:6e brd ff:ff:ff:ff:ff:ff link-netnsid 22
+    inet6 fe80::88f4:60ff:fed7:c96e/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+31: vetha671303@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br-6d2979e61777 state UP group default 
+    link/ether 46:8d:6e:b3:d6:67 brd ff:ff:ff:ff:ff:ff link-netnsid 23
+    inet6 fe80::448d:6eff:feb3:d667/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+32: veth238724e@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br-dicom-secure state UP group default 
+    link/ether 36:c1:46:d6:68:0c brd ff:ff:ff:ff:ff:ff link-netnsid 24
+    inet6 fe80::34c1:46ff:fed6:680c/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+34: veth9b68ed3@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br-dicom-secure state UP group default 
+    link/ether 1e:f1:ff:90:20:c3 brd ff:ff:ff:ff:ff:ff link-netnsid 26
+    inet6 fe80::1cf1:ffff:fe90:20c3/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+35: veth9a7c2ac@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br-dicom-secure state UP group default 
+    link/ether 76:6e:3e:11:03:69 brd ff:ff:ff:ff:ff:ff link-netnsid 27
+    inet6 fe80::746e:3eff:fe11:369/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+37: veth05c647c@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br-dicom-secure state UP group default 
+    link/ether 72:e0:52:d8:65:38 brd ff:ff:ff:ff:ff:ff link-netnsid 12
+    inet6 fe80::70e0:52ff:fed8:6538/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+142: br-83baffe56e50: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default 
+    link/ether a6:fb:07:3c:7f:97 brd ff:ff:ff:ff:ff:ff
+    inet 172.27.0.1/16 brd 172.27.255.255 scope global br-83baffe56e50
+       valid_lft forever preferred_lft forever
+    inet6 fe80::a4fb:7ff:fe3c:7f97/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+143: veth13b59f2@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br-83baffe56e50 state UP group default 
+    link/ether 2a:86:92:5d:84:f6 brd ff:ff:ff:ff:ff:ff link-netnsid 28
+    inet6 fe80::2886:92ff:fe5d:84f6/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+145: veth44cd6fa@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br-83baffe56e50 state UP group default 
+    link/ether ca:aa:86:be:eb:56 brd ff:ff:ff:ff:ff:ff link-netnsid 30
+    inet6 fe80::c8aa:86ff:febe:eb56/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+17462: vethf40e4d9@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br-dicom-secure state UP group default 
+    link/ether 3e:56:16:78:ba:c7 brd ff:ff:ff:ff:ff:ff link-netnsid 15
+    inet6 fe80::3c56:16ff:fe78:bac7/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+17463: veth49e0df8@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br-dicom-secure state UP group default 
+    link/ether 9e:0c:af:3e:e9:9c brd ff:ff:ff:ff:ff:ff link-netnsid 17
+    inet6 fe80::9c0c:afff:fe3e:e99c/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+21745: vethf9368d3@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br-dicom-secure state UP group default 
+    link/ether 1a:17:65:5f:cc:d1 brd ff:ff:ff:ff:ff:ff link-netnsid 7
+    inet6 fe80::1817:65ff:fe5f:ccd1/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+26924: veth4ec381a@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br-dicom-secure state UP group default 
+    link/ether 72:f3:02:da:5f:ef brd ff:ff:ff:ff:ff:ff link-netnsid 21
+    inet6 fe80::70f3:2ff:feda:5fef/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+26927: vethcd4d034@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br-dicom-secure state UP group default 
+    link/ether 86:20:b5:9c:44:4f brd ff:ff:ff:ff:ff:ff link-netnsid 25
+    inet6 fe80::8420:b5ff:fe9c:444f/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever
+26928: vethf26774d@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br-dicom-secure state UP group default 
+    link/ether 1e:16:84:40:eb:64 brd ff:ff:ff:ff:ff:ff link-netnsid 29
+    inet6 fe80::1c16:84ff:fe40:eb64/64 scope link proto kernel_ll 
+       valid_lft forever preferred_lft forever

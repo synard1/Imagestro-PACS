@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clear Service Workers & Cache</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 600px;
+            width: 100%;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+
+        h1 {
+            color: #1a202c;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+
+        .subtitle {
+            color: #718096;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        .status {
+            background: #f7fafc;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 0;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .status-item:last-child {
+            border-bottom: none;
+        }
+
+        .status-icon {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+        }
+
+        .status-icon.pending {
+            background: #fef3c7;
+            color: #f59e0b;
+        }
+
+        .status-icon.success {
+            background: #d1fae5;
+            color: #10b981;
+        }
+
+        .status-icon.error {
+            background: #fee2e2;
+            color: #ef4444;
+        }
+
+        .status-text {
+            flex: 1;
+            color: #4a5568;
+            font-size: 14px;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 16px;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-bottom: 12px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-secondary {
+            background: #f7fafc;
+            color: #4a5568;
+            border: 2px solid #e2e8f0;
+        }
+
+        .btn-secondary:hover {
+            background: #edf2f7;
+        }
+
+        .log {
+            background: #1a202c;
+            color: #e2e8f0;
+            border-radius: 12px;
+            padding: 20px;
+            margin-top: 20px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .log-entry {
+            margin-bottom: 8px;
+            line-height: 1.6;
+        }
+
+        .log-entry.success {
+            color: #10b981;
+        }
+
+        .log-entry.error {
+            color: #ef4444;
+        }
+
+        .log-entry.info {
+            color: #3b82f6;
+        }
+
+        .warning {
+            background: #fef3c7;
+            border-left: 4px solid #f59e0b;
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            color: #92400e;
+            font-size: 14px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>🧹 Service Worker Cleaner</h1>
+        <p class="subtitle">Force unregister all service workers and clear all caches</p>
+
+        <div class="warning">
+            ⚠️ <strong>Warning:</strong> This will unregister ALL service workers and delete ALL caches for this origin.
+            The page will reload after completion.
+        </div>
+
+        <div class="status" id="status">
+            <div class="status-item">
+                <div class="status-icon pending" id="sw-icon">⏳</div>
+                <div class="status-text" id="sw-text">Service Workers: Checking...</div>
+            </div>
+            <div class="status-item">
+                <div class="status-icon pending" id="cache-icon">⏳</div>
+                <div class="status-text" id="cache-text">Caches: Checking...</div>
+            </div>
+            <div class="status-item">
+                <div class="status-icon pending" id="storage-icon">⏳</div>
+                <div class="status-text" id="storage-text">Storage: Checking...</div>
+            </div>
+        </div>
+
+        <button class="btn btn-primary" id="cleanBtn" onclick="cleanAll()">
+            🗑️ Clean Everything
+        </button>
+
+        <button class="btn btn-secondary" onclick="window.location.reload()">
+            🔄 Reload Page
+        </button>
+
+        <div class="log" id="log"></div>
+    </div>
+
+    <script>
+        const log = [];
+
+        function addLog(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            log.push({ timestamp, message, type });
+            updateLogDisplay();
+        }
+
+        function updateLogDisplay() {
+            const logEl = document.getElementById('log');
+            logEl.innerHTML = log.map(entry =>
+                `<div class="log-entry ${entry.type}">[${entry.timestamp}] ${entry.message}</div>`
+            ).join('');
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        function updateStatus(id, icon, text, status) {
+            const iconEl = document.getElementById(`${id}-icon`);
+            const textEl = document.getElementById(`${id}-text`);
+
+            iconEl.className = `status-icon ${status}`;
+            iconEl.textContent = status === 'success' ? '✓' : status === 'error' ? '✗' : '⏳';
+            textEl.textContent = text;
+        }
+
+        async function checkStatus() {
+            try {
+                // Check service workers
+                if ('serviceWorker' in navigator) {
+                    const registrations = await navigator.serviceWorker.getRegistrations();
+                    updateStatus('sw', '✓', `Service Workers: ${registrations.length} found`,
+                        registrations.length > 0 ? 'error' : 'success');
+                    addLog(`Found ${registrations.length} service worker(s)`,
+                        registrations.length > 0 ? 'error' : 'success');
+                } else {
+                    updateStatus('sw', '✓', 'Service Workers: Not supported', 'info');
+                    addLog('Service workers not supported', 'info');
+                }
+
+                // Check caches
+                if ('caches' in window) {
+                    const cacheNames = await caches.keys();
+                    updateStatus('cache', '✓', `Caches: ${cacheNames.length} found`,
+                        cacheNames.length > 0 ? 'error' : 'success');
+                    addLog(`Found ${cacheNames.length} cache(s): ${cacheNames.join(', ')}`,
+                        cacheNames.length > 0 ? 'error' : 'success');
+                } else {
+                    updateStatus('cache', '✓', 'Caches: Not supported', 'info');
+                    addLog('Cache API not supported', 'info');
+                }
+
+                // Check storage
+                if ('storage' in navigator && 'estimate' in navigator.storage) {
+                    const estimate = await navigator.storage.estimate();
+                    const usedMB = (estimate.usage / 1024 / 1024).toFixed(2);
+                    updateStatus('storage', '✓', `Storage: ${usedMB} MB used`, 'info');
+                    addLog(`Storage usage: ${usedMB} MB`, 'info');
+                } else {
+                    updateStatus('storage', '✓', 'Storage: API not supported', 'info');
+                }
+            } catch (error) {
+                addLog(`Error checking status: ${error.message}`, 'error');
+            }
+        }
+
+        async function cleanAll() {
+            const btn = document.getElementById('cleanBtn');
+            btn.disabled = true;
+            btn.textContent = '🧹 Cleaning...';
+
+            addLog('Starting cleanup process...', 'info');
+
+            try {
+                // 1. Unregister all service workers
+                if ('serviceWorker' in navigator) {
+                    addLog('Unregistering service workers...', 'info');
+                    const registrations = await navigator.serviceWorker.getRegistrations();
+
+                    for (const registration of registrations) {
+                        const scope = registration.scope;
+                        const success = await registration.unregister();
+                        if (success) {
+                            addLog(`✓ Unregistered service worker: ${scope}`, 'success');
+                        } else {
+                            addLog(`✗ Failed to unregister: ${scope}`, 'error');
+                        }
+                    }
+
+                    updateStatus('sw', '✓', 'Service Workers: All unregistered', 'success');
+                }
+
+                // 2. Delete all caches
+                if ('caches' in window) {
+                    addLog('Deleting caches...', 'info');
+                    const cacheNames = await caches.keys();
+
+                    for (const cacheName of cacheNames) {
+                        const success = await caches.delete(cacheName);
+                        if (success) {
+                            addLog(`✓ Deleted cache: ${cacheName}`, 'success');
+                        } else {
+                            addLog(`✗ Failed to delete cache: ${cacheName}`, 'error');
+                        }
+                    }
+
+                    updateStatus('cache', '✓', 'Caches: All deleted', 'success');
+                }
+
+                // 3. Clear localStorage
+                addLog('Clearing localStorage...', 'info');
+                localStorage.clear();
+                addLog('✓ localStorage cleared', 'success');
+
+                // 4. Clear sessionStorage
+                addLog('Clearing sessionStorage...', 'info');
+                sessionStorage.clear();
+                addLog('✓ sessionStorage cleared', 'success');
+
+                updateStatus('storage', '✓', 'Storage: All cleared', 'success');
+
+                addLog('✓ Cleanup completed successfully!', 'success');
+                addLog('Reloading page in 2 seconds...', 'info');
+
+                // Reload page after 2 seconds
+                setTimeout(() => {
+                    window.location.reload(true);
+                }, 2000);
+
+            } catch (error) {
+                addLog(`✗ Error during cleanup: ${error.message}`, 'error');
+                btn.disabled = false;
+                btn.textContent = '🗑️ Clean Everything';
+            }
+        }
+
+        // Check status on load
+        window.addEventListener('load', () => {
+            addLog('Page loaded, checking status...', 'info');
+            checkStatus();
+        });
+    </script>
+</body>
+
+</html>

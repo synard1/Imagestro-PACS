@@ -1,0 +1,1115 @@
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import StatusBadge from '../components/StatusBadge'
+import OrderActionButtons from '../components/OrderActionButtons'
+import { getAllStatuses } from '../config/orderStatus'
+import { getConfig } from '../services/config'
+import { getDataStorageConfig } from '../services/dataSync'
+import { getAuthHeader } from '../services/auth-storage'
+import { uploadService } from '../services/uploadService'
+import { satusehatService } from '../services/satusehatService'
+import orderService from '../services/orderService'
+import LoadingScreen from '../components/LoadingScreen'
+import { useToast } from '../components/ToastProvider'
+// using alert() for user feedback here to keep behavior consistent with other actions
+
+// Define all possible columns with their labels and default visibility
+const ALL_COLUMNS = [
+  { key: 'index', label: '#', visible: true },
+  { key: 'order_number', label: 'Order Number', visible: true },
+  { key: 'patient_name', label: 'Patient Name', visible: true },
+  { key: 'requested_procedure', label: 'Requested Procedure', visible: true },
+  { key: 'scheduled', label: 'Scheduled', visible: true },
+  { key: 'status', label: 'Status', visible: true },
+  { key: 'accession_number', label: 'Accession Number', visible: false },
+  { key: 'medical_record_number', label: 'MRN', visible: false },
+  { key: 'modality', label: 'Modality', visible: false },
+  { key: 'actions', label: 'Actions', visible: true }
+]
+
+const getOrdersAuthHeaders = () => {
+  const stored = getAuthHeader() || {}
+  if (stored.Authorization) {
+    return stored
+  }
+
+  const fallbackToken = import.meta.env?.VITE_ORDERS_API_TOKEN
+  if (fallbackToken) {
+    return { Authorization: `Bearer ${fallbackToken}` }
+  }
+
+  return {}
+}
+
+// Storage indicator component
+const StorageIndicator = ({ storageType, className = "" }) => {
+  const storageInfo = {
+    browser: {
+      text: 'Browser Storage',
+      icon: '💾',
+      color: 'text-blue-600',
+      bgColor: 'bg-blue-100',
+      description: 'Data stored locally in browser localStorage'
+    },
+    server: {
+      text: 'Server Storage',
+      icon: '📡',
+      color: 'text-green-600',
+      bgColor: 'bg-green-100',
+      description: 'Data stored on remote server with synchronization'
+    },
+    external: {
+      text: 'External API',
+      icon: '☁️',
+      color: 'text-purple-600',
+      bgColor: 'bg-purple-100',
+      description: 'Data retrieved from external backend API'
+    }
+  };
+
+  const info = storageInfo[storageType] || storageInfo.browser;
+
+  return (
+    <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs ${info.bgColor} ${info.color} ${className}`} title={info.description}>
+      <span className="mr-1">{info.icon}</span>
+      {info.text}
+    </div>
+  );
+};
+
+export default function Orders() {
+  const [rows, setRows] = useState([])
+  const [sendingOrders, setSendingOrders] = useState([])
+  const [syncingOrders, setSyncingOrders] = useState([]) // Track orders being synced to backend
+  const [orderFilesMap, setOrderFilesMap] = useState({}) // orderId -> files[]
+  const [loadingFilesRow, setLoadingFilesRow] = useState(null) // orderId currently loading
+  const [q, setQ] = useState('')
+  const [status, setStatus] = useState('')
+  const [backendTest, setBackendTest] = useState({ status: 'idle' })
+  const [appConfig, setAppConfig] = useState(null)
+  const [columnVisibility, setColumnVisibility] = useState(() => {
+    // Load column visibility from localStorage or use defaults
+    const saved = localStorage.getItem('orders_column_visibility')
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved)
+        // Merge with ALL_COLUMNS to handle new columns
+        return ALL_COLUMNS.map(col => ({
+          ...col,
+          visible: parsed[col.key] !== undefined ? parsed[col.key] : col.visible
+        }))
+      } catch (e) {
+        return ALL_COLUMNS
+      }
+    }
+    return ALL_COLUMNS
+  })
+  const [showColumnMenu, setShowColumnMenu] = useState(false) // State for column visibility dropdown
+  const nav = useNavigate()
+  const toast = useToast()
+  const OFFLINE_KEY = 'orders_offline'
+  const storageConfig = getDataStorageConfig()
+
+  // Helper function to format date for display
+  const formatDateTimeForDisplay = (dateTimeString) => {
+    if (!dateTimeString) return '—'
+    try {
+      // Handle different date formats including GMT strings
+      let date
+      if (typeof dateTimeString === 'string') {
+        if (dateTimeString.includes('GMT')) {
+          // Handle GMT format like "Fri, 07 Nov 2025 09:00:00 GMT"
+          date = new Date(dateTimeString)
+        } else if (dateTimeString.match(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/)) {
+          // Handle format like "2025-11-07 09:00"
+          date = new Date(dateTimeString.replace(' ', 'T'))
+        } else {
+          // Handle ISO and other standard formats
+          date = new Date(dateTimeString)
+        }
+      } else {
+        date = new Date(dateTimeString)
+      }
+
+      if (isNaN(date.getTime())) return '—'
+      return date.toLocaleString()
+    } catch (e) {
+      console.error('[Orders] Date formatting error:', e)
+      return '—'
+    }
+  }
+
+  // Gabungkan data server  offline (jika ada)
+  useEffect(() => {
+    const load = async () => {
+      let server = []
+      try { server = await orderService.listOrders() } catch { server = [] }
+      const raw = localStorage.getItem(OFFLINE_KEY)
+      const offline = raw ? JSON.parse(raw) : []
+      // server dulu, offline muncul di atas agar mudah terlihat
+      const merged = [...offline, ...(server || [])]
+      // Enrich orders with patient IHS when possible (best-effort)
+      const enriched = await Promise.all(merged.map(async o => {
+        try {
+          // Prefer patient IHS from order if present
+          let ihs = o.patient_ihs || o.patient_ihs_number || null
+          if (!ihs && o.patient_id) {
+            try {
+              // Use orderService to get patient data
+              // For now, we'll keep the existing pattern but note that this should also use the patient service
+              return { ...o, _patientIhs: ihs }
+            } catch (e) {
+              // ignore
+            }
+          }
+          return { ...o, _patientIhs: ihs }
+        } catch (e) {
+          return { ...o, _patientIhs: null }
+        }
+      }))
+
+      // Debug: Log completed orders to check scheduled field
+      const completedOrders = enriched.filter(o => o.status === 'completed');
+      if (completedOrders.length > 0) {
+        console.log('[Orders] Load - Found completed orders:', completedOrders.length);
+        completedOrders.forEach(o => {
+          const hasSchedule = !!(o.scheduled_start_at || o.scheduled_at || o.scheduledStartAt || o.scheduled_time);
+          console.log(`[Orders] Load - Order ${o.order_number || o.id}:`, {
+            status: o.status,
+            hasSchedule,
+            scheduled_start_at: o.scheduled_start_at,
+            scheduled_at: o.scheduled_at,
+            scheduledStartAt: o.scheduledStartAt,
+            scheduled_time: o.scheduled_time,
+            allKeys: Object.keys(o)
+          });
+        });
+      }
+
+      setRows(enriched)
+      // Note: don't load files for all orders here. Files are loaded on-demand per-row to avoid heavy initial fetch.
+    }
+    load()
+
+    // Listen for cross-page cache invalidation (from dashboard send/cancel)
+    const onStorage = (e) => {
+      if (e.key === 'satusehat_orders_invalidate') {
+        load()
+        setOrderFilesMap({})
+      }
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [])
+
+  const refresh = () => {
+    // trigger ulang efek di atas
+    (async () => {
+      let server = []
+      try { server = await orderService.listOrders() } catch { server = [] }
+      const raw = localStorage.getItem(OFFLINE_KEY)
+      const offline = raw ? JSON.parse(raw) : []
+      const merged = [...offline, ...(server || [])]
+      const enriched = await Promise.all(merged.map(async o => {
+        try {
+          let ihs = o.patient_ihs || o.patient_ihs_number || null
+          if (!ihs && o.patient_id) {
+            try {
+              // For now, we'll keep the existing pattern but note that this should also use the patient service
+              return { ...o, _patientIhs: ihs }
+            } catch (e) { }
+          }
+          return { ...o, _patientIhs: ihs }
+        } catch (e) { return { ...o, _patientIhs: null } }
+      }))
+
+      // Debug: Log completed orders after refresh
+      const completedOrders = enriched.filter(o => o.status === 'completed');
+      if (completedOrders.length > 0) {
+        console.log('[Orders] Refresh - Found completed orders:', completedOrders.length);
+        completedOrders.forEach(o => {
+          const hasSchedule = !!(o.scheduled_start_at || o.scheduled_at || o.scheduledStartAt || o.scheduled_time);
+          console.log(`[Orders] Refresh - Order ${o.order_number || o.id}:`, {
+            status: o.status,
+            hasSchedule,
+            scheduled_start_at: o.scheduled_start_at,
+            scheduled_at: o.scheduled_at,
+            scheduledStartAt: o.scheduledStartAt,
+            scheduled_time: o.scheduled_time
+          });
+        });
+      }
+
+      setRows(enriched)
+      // Clear cached files on refresh to ensure we fetch fresh on demand
+      setOrderFilesMap({})
+    })()
+  }
+
+  const testBackendConnection = useCallback(async () => {
+    if (!appConfig) {
+      setBackendTest({
+        status: 'error',
+        message: 'Configuration not loaded',
+        testedAt: new Date().toISOString()
+      })
+      return
+    }
+
+    const headers = {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      ...getOrdersAuthHeaders()
+    }
+
+    if (!headers.Authorization) {
+      setBackendTest({
+        status: 'error',
+        message: 'Missing auth token. Login first or set VITE_ORDERS_API_TOKEN.',
+        testedAt: new Date().toISOString()
+      })
+      return
+    }
+
+    const now = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now())
+    const baseUrl = (appConfig.apiBaseUrl || '').replace(/\/+$/, '')
+
+    try {
+      setBackendTest({ status: 'running' })
+      const started = now()
+      const response = await fetch(`${baseUrl}/orders`, { method: 'GET', headers })
+      const durationMs = Math.max(now() - started, 0)
+
+      let payload = null
+      try {
+        payload = await response.json()
+      } catch {
+        payload = null
+      }
+
+      if (!response.ok) {
+        const message = payload?.message || `Request failed with status ${response.status}`
+        throw new Error(message)
+      }
+
+      let total = 0
+      if (Array.isArray(payload?.orders)) {
+        total = payload.orders.length
+      } else if (typeof payload?.count === 'number') {
+        total = payload.count
+      } else if (typeof payload?.total === 'number') {
+        total = payload.total
+      }
+
+      setBackendTest({
+        status: 'success',
+        total,
+        durationMs,
+        testedAt: new Date().toISOString()
+      })
+    } catch (error) {
+      setBackendTest({
+        status: 'error',
+        message: error.message || 'Unknown error',
+        testedAt: new Date().toISOString()
+      })
+    }
+  }, [appConfig])
+
+  // Load files for a single order (cache result)
+  const loadFilesForOrder = async (orderId) => {
+    if (orderFilesMap[orderId]) return orderFilesMap[orderId]
+    setLoadingFilesRow(orderId)
+    try {
+      const files = await uploadService.getOrderFiles(orderId)
+      setOrderFilesMap(prev => ({ ...prev, [orderId]: files || [] }))
+      return files || []
+    } catch (e) {
+      setOrderFilesMap(prev => ({ ...prev, [orderId]: [] }))
+      return []
+    } finally {
+      setLoadingFilesRow(null)
+    }
+  }
+
+  const removeOffline = (id) => {
+    const raw = localStorage.getItem(OFFLINE_KEY)
+    const arr = raw ? JSON.parse(raw) : []
+    const next = arr.filter(x => x.id !== id)
+    localStorage.setItem(OFFLINE_KEY, JSON.stringify(next))
+  }
+
+  // Sync a single offline order to backend
+  const syncOfflineOrder = async (order) => {
+    if (!order._offline) {
+      alert('This order is already synced to backend')
+      return
+    }
+
+    if (syncingOrders.includes(order.id)) {
+      return // Already syncing
+    }
+
+    setSyncingOrders(prev => [...prev, order.id])
+
+    try {
+      // Debug: Log original offline order
+      console.log('[Orders] Sync - Original offline order:', order)
+      console.log('[Orders] Sync - referring_doctor in offline order:', order.referring_doctor)
+      console.log('[Orders] Sync - referring_name in offline order:', order.referring_name)
+
+      // Prepare order data for backend (remove temporary fields)
+      let orderData = { ...order }
+      delete orderData._offline
+      delete orderData._patientIhs
+      delete orderData.id // Let backend generate new ID
+
+      // Map field names from localStorage structure to backend schema
+      // Map requested_procedure to procedure_name (required field)
+      if (orderData.requested_procedure) {
+        orderData.procedure_name = orderData.requested_procedure
+        delete orderData.requested_procedure
+      }
+
+      // Map scheduled_start_at to scheduled_at
+      if (orderData.scheduled_start_at) {
+        orderData.scheduled_at = orderData.scheduled_start_at
+        delete orderData.scheduled_start_at
+      }
+
+      // Map station_ae_title to ordering_station_aet
+      if (orderData.station_ae_title) {
+        orderData.ordering_station_aet = orderData.station_ae_title
+        delete orderData.station_ae_title
+      }
+
+      // Extract data from metadata if it exists
+      if (order.metadata) {
+        // Extract referring doctor from metadata.referring
+        if (order.metadata.referring && order.metadata.referring.name) {
+          orderData.referring_doctor = order.metadata.referring.name
+          orderData.referring_name = order.metadata.referring.name
+          if (order.metadata.referring.id) {
+            orderData.referring_id = order.metadata.referring.id
+          }
+        }
+
+        // Extract nurse from metadata.nurse
+        if (order.metadata.nurse && order.metadata.nurse.name) {
+          orderData.attending_nurse = order.metadata.nurse.name
+          orderData.nurse_name = order.metadata.nurse.name
+        }
+
+        // Extract priority and reason
+        if (order.metadata.priority) {
+          orderData.priority = order.metadata.priority
+        }
+        if (order.metadata.reason) {
+          orderData.clinical_indication = order.metadata.reason
+        }
+
+        // Don't send metadata object itself (it's been extracted)
+        delete orderData.metadata
+      }
+
+      // Add default modality if not provided (required field)
+      if (!orderData.modality) {
+        orderData.modality = 'CT' // Default modality
+      }
+
+      // Fetch patient details if patient_id is provided to enrich order data
+      if (orderData.patient_id) {
+        try {
+          const { getPatient } = await import('../services/patientService')
+          const patientDetails = await getPatient(orderData.patient_id)
+
+          // Enrich order data with patient details (preserve existing if patient data not available)
+          if (patientDetails) {
+            orderData = {
+              ...orderData,
+              patient_name: patientDetails.patient_name || patientDetails.name || orderData.patient_name,
+              patient_national_id: patientDetails.patient_national_id || patientDetails.patient_id || orderData.patient_national_id,
+              gender: patientDetails.gender || patientDetails.sex || orderData.gender,
+              birth_date: patientDetails.birth_date || patientDetails.birthdate || orderData.birth_date,
+              medical_record_number: patientDetails.medical_record_number || patientDetails.mrn || orderData.medical_record_number,
+              phone: patientDetails.phone || patientDetails.contact_phone || orderData.phone,
+              address: patientDetails.address || orderData.address,
+              // Preserve referring_doctor from original order
+              referring_doctor: orderData.referring_doctor
+            }
+          }
+        } catch (patientError) {
+          console.warn('[Orders] Could not fetch patient details for enrichment:', patientError)
+          // Continue with existing order data
+        }
+      }
+
+      // Ensure referring_doctor is set (required field)
+      // Priority: existing referring_doctor > referring_name > default
+      if (!orderData.referring_doctor && orderData.referring_name) {
+        orderData.referring_doctor = orderData.referring_name
+      }
+      if (!orderData.referring_doctor) {
+        orderData.referring_doctor = 'Unknown' // Default value
+      }
+
+      // Debug: Log prepared order data before sending
+      console.log('[Orders] Sync - Prepared orderData:', orderData)
+      console.log('[Orders] Sync - referring_doctor in payload:', orderData.referring_doctor)
+      console.log('[Orders] Sync - All fields being sent:', Object.keys(orderData))
+
+      // Create order on backend
+      const response = await orderService.createOrder(orderData)
+
+      // Remove from offline storage on success
+      removeOffline(order.id)
+
+      // Refresh to show the synced order
+      refresh()
+
+      const orderIdentifier = response?.order_number || response?.order?.order_number || 'Order'
+      alert(`Order ${orderIdentifier} synced successfully to backend!`)
+    } catch (error) {
+      console.error('[Orders] Sync failed:', error)
+      alert(`Failed to sync order: ${error.message}`)
+    } finally {
+      setSyncingOrders(prev => prev.filter(id => id !== order.id))
+    }
+  }
+
+  // Sync all offline orders to backend
+  const syncAllOfflineOrders = async () => {
+    const raw = localStorage.getItem(OFFLINE_KEY)
+    const offlineOrders = raw ? JSON.parse(raw) : []
+
+    if (offlineOrders.length === 0) {
+      alert('No offline orders to sync')
+      return
+    }
+
+    if (!confirm(`Sync ${offlineOrders.length} offline order(s) to backend?`)) {
+      return
+    }
+
+    let successCount = 0
+    let failCount = 0
+
+    for (const order of offlineOrders) {
+      try {
+        // Prepare order data for backend
+        let orderData = { ...order }
+        delete orderData._offline
+        delete orderData._patientIhs
+        delete orderData.id // Let backend generate new ID
+
+        // Map field names from localStorage structure to backend schema
+        // Map requested_procedure to procedure_name (required field)
+        if (orderData.requested_procedure) {
+          orderData.procedure_name = orderData.requested_procedure
+          delete orderData.requested_procedure
+        }
+
+        // Map scheduled_start_at to scheduled_at
+        if (orderData.scheduled_start_at) {
+          orderData.scheduled_at = orderData.scheduled_start_at
+          delete orderData.scheduled_start_at
+        }
+
+        // Map station_ae_title to ordering_station_aet
+        if (orderData.station_ae_title) {
+          orderData.ordering_station_aet = orderData.station_ae_title
+          delete orderData.station_ae_title
+        }
+
+        // Extract data from metadata if it exists
+        if (order.metadata) {
+          // Extract referring doctor from metadata.referring
+          if (order.metadata.referring && order.metadata.referring.name) {
+            orderData.referring_doctor = order.metadata.referring.name
+            orderData.referring_name = order.metadata.referring.name
+            if (order.metadata.referring.id) {
+              orderData.referring_id = order.metadata.referring.id
+            }
+          }
+
+          // Extract nurse from metadata.nurse
+          if (order.metadata.nurse && order.metadata.nurse.name) {
+            orderData.attending_nurse = order.metadata.nurse.name
+            orderData.nurse_name = order.metadata.nurse.name
+          }
+
+          // Extract priority and reason
+          if (order.metadata.priority) {
+            orderData.priority = order.metadata.priority
+          }
+          if (order.metadata.reason) {
+            orderData.clinical_indication = order.metadata.reason
+          }
+
+          // Don't send metadata object itself (it's been extracted)
+          delete orderData.metadata
+        }
+
+        // Add default modality if not provided (required field)
+        if (!orderData.modality) {
+          orderData.modality = 'CT' // Default modality
+        }
+
+        // Fetch patient details if patient_id is provided to enrich order data
+        if (orderData.patient_id) {
+          try {
+            const { getPatient } = await import('../services/patientService')
+            const patientDetails = await getPatient(orderData.patient_id)
+
+            // Enrich order data with patient details
+            if (patientDetails) {
+              orderData = {
+                ...orderData,
+                patient_name: patientDetails.patient_name || patientDetails.name || orderData.patient_name,
+                patient_national_id: patientDetails.patient_national_id || patientDetails.patient_id || orderData.patient_id,
+                gender: patientDetails.gender || patientDetails.sex || orderData.gender,
+                birth_date: patientDetails.birth_date || patientDetails.birthdate || orderData.birth_date,
+                medical_record_number: patientDetails.medical_record_number || patientDetails.mrn || orderData.medical_record_number,
+                phone: patientDetails.phone || patientDetails.contact_phone || orderData.phone,
+                address: patientDetails.address || orderData.address
+              }
+            }
+          } catch (patientError) {
+            console.warn(`[Orders] Could not fetch patient details for order ${order.accession_no}:`, patientError)
+            // Continue with existing order data
+          }
+        }
+
+        // Ensure referring_doctor is set (required field)
+        if (!orderData.referring_doctor && orderData.referring_name) {
+          orderData.referring_doctor = orderData.referring_name
+        }
+        if (!orderData.referring_doctor) {
+          orderData.referring_doctor = 'Unknown' // Default value
+        }
+
+        // Create order on backend
+        await orderService.createOrder(orderData)
+
+        // Remove from offline storage on success
+        removeOffline(order.id)
+        successCount++
+      } catch (error) {
+        console.error(`[Orders] Failed to sync order ${order.accession_no}:`, error)
+        failCount++
+      }
+    }
+
+    // Refresh to show synced orders
+    refresh()
+
+    if (failCount === 0) {
+      alert(`Successfully synced ${successCount} order(s) to backend!`)
+    } else {
+      alert(`Synced ${successCount} order(s). Failed: ${failCount}. Check console for details.`)
+    }
+  }
+
+  // Toggle column visibility
+  const toggleColumnVisibility = (columnKey) => {
+    const updatedVisibility = columnVisibility.map(col =>
+      col.key === columnKey ? { ...col, visible: !col.visible } : col
+    )
+    setColumnVisibility(updatedVisibility)
+    // Save to localStorage
+    const visibilityObject = updatedVisibility.reduce((acc, col) => {
+      acc[col.key] = col.visible
+      return acc
+    }, {})
+    localStorage.setItem('orders_column_visibility', JSON.stringify(visibilityObject))
+  }
+
+  // Close column menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      // Check if click is outside the column visibility dropdown
+      const columnDropdown = document.getElementById('column-visibility-dropdown');
+      if (showColumnMenu && columnDropdown && !columnDropdown.contains(event.target)) {
+        setShowColumnMenu(false);
+      }
+    };
+
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, [showColumnMenu]);
+
+  const onDelete = async (row) => {
+    if (!confirm(`Delete order ${row.accession_no}?`)) return
+
+    try {
+      if (row._offline) {
+        // Delete offline order
+        removeOffline(row.id)
+        refresh()
+        alert('Offline order deleted successfully')
+      } else {
+        // Delete backend order using orderService
+        await orderService.deleteOrder(row.id)
+        refresh()
+        alert('Order deleted successfully')
+      }
+    } catch (e) {
+      alert(`Failed to delete order: ${e.message}`)
+    }
+  }
+
+  const onChangeStatus = async (order, newStatus, notes = '') => {
+    try {
+      // Compose existing history from any known location (will be refined below)
+      let existingHistory = (
+        order.details?.status_history ||
+        order.status_history ||
+        order.metadata?.status_history ||
+        []
+      )
+
+      // Helper: format duration in human readable form
+      const formatDuration = (ms) => {
+        const totalSec = Math.max(0, Math.floor(ms / 1000))
+        const days = Math.floor(totalSec / 86400)
+        const hours = Math.floor((totalSec % 86400) / 3600)
+        const minutes = Math.floor((totalSec % 3600) / 60)
+        const seconds = totalSec % 60
+        const parts = []
+        if (days) parts.push(`${days}d`)
+        if (hours) parts.push(`${hours}h`)
+        if (minutes) parts.push(`${minutes}m`)
+        if (seconds || parts.length === 0) parts.push(`${seconds}s`)
+        return parts.join(' ')
+      }
+
+      // Build timestamps in local time (with offset) and UTC for consistency
+      const now = new Date()
+      const tzOffsetMin = now.getTimezoneOffset() // minutes to add to local to get UTC (negative in UTC+)
+      const pad = (n) => String(n).padStart(2, '0')
+      const offsetSign = tzOffsetMin <= 0 ? '+' : '-'
+      const offsetAbs = Math.abs(tzOffsetMin)
+      const offsetHH = pad(Math.floor(offsetAbs / 60))
+      const offsetMM = pad(offsetAbs % 60)
+      const localIso = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}${offsetSign}${offsetHH}:${offsetMM}`
+      const utcIso = now.toISOString()
+      let prevStatus = order.status || existingHistory?.[existingHistory.length - 1]?.status || 'unknown'
+      let lastTsRaw = existingHistory?.[existingHistory.length - 1]?.timestamp_utc || existingHistory?.[existingHistory.length - 1]?.timestamp || order.updated_at || order.created_at || order.scheduled_start_at || order.scheduled_at
+
+      // For backend orders, fetch latest to ensure we append instead of overwrite
+      let latest = null
+      if (!order._offline) {
+        try {
+          latest = await orderService.getOrder(order.id)
+          const latestHistory = (
+            latest.details?.status_history ||
+            latest.status_history ||
+            latest.metadata?.status_history ||
+            []
+          )
+          if (Array.isArray(latestHistory)) {
+            existingHistory = latestHistory
+          }
+          prevStatus = latest.status || prevStatus
+          lastTsRaw = latestHistory?.[latestHistory.length - 1]?.timestamp_utc || latestHistory?.[latestHistory.length - 1]?.timestamp || latest.updated_at || latest.created_at || latest.scheduled_start_at || latest.scheduled_at || lastTsRaw
+        } catch (e) {
+          // Non-fatal: fall back to current order object
+          console.warn('[Orders] Failed to fetch latest order; using local state:', e?.message)
+        }
+      }
+
+      const lastTs = lastTsRaw ? new Date(lastTsRaw).getTime() : Date.now()
+      const deltaMs = Date.now() - lastTs
+      const deltaHuman = formatDuration(deltaMs)
+
+      const newEntry = {
+        status: newStatus,
+        timestamp: localIso, // local time with timezone offset
+        timestamp_utc: utcIso,
+        timezone_offset_minutes: -tzOffsetMin, // minutes east of UTC (UTC+7 -> 420)
+        user: 'current_user', // Replace with actual user integration
+        notes: notes,
+        prev_status: prevStatus,
+        next_status: newStatus,
+        delta_ms: deltaMs,
+        delta_human: deltaHuman
+      }
+
+      const newHistory = [
+        ...existingHistory,
+        newEntry
+      ]
+
+      if (order._offline) {
+        // Update offline order
+        const raw = localStorage.getItem(OFFLINE_KEY)
+        const arr = raw ? JSON.parse(raw) : []
+        const idx = arr.findIndex(o => o.id === order.id)
+        if (idx !== -1) {
+          arr[idx].status = newStatus
+          // Keep history in both top-level and details for offline robustness
+          arr[idx].status_history = newHistory
+          arr[idx].details = { ...(arr[idx].details || {}), status_history: newHistory }
+          localStorage.setItem(OFFLINE_KEY, JSON.stringify(arr))
+          refresh()
+          alert(`Order status changed to ${newStatus}`)
+        }
+      } else {
+        // Update backend order using refactored approach with details column
+        // Preserve scheduled time when updating status
+        const source = latest || order
+        const updateData = {
+          status: newStatus,
+          details: {
+            ...(order.details || {}),
+            status_history: newHistory
+          }
+        }
+
+        // Preserve scheduled time field if it exists
+        if (source.scheduled_start_at) {
+          updateData.scheduled_at = source.scheduled_start_at
+        } else if (source.scheduled_at) {
+          updateData.scheduled_at = source.scheduled_at
+        } else if (source.scheduledStartAt) {
+          updateData.scheduled_at = source.scheduledStartAt
+        } else if (source.scheduled_time) {
+          updateData.scheduled_at = source.scheduled_time
+        }
+
+        // Debug logging
+        console.log('[Orders] onChangeStatus - Order data:', order);
+        console.log('[Orders] onChangeStatus - Update payload:', updateData);
+        console.log('[Orders] onChangeStatus - Scheduled time being sent:', updateData.scheduled_at || 'NOT FOUND');
+
+        await orderService.updateOrder(order.id, updateData)
+        refresh()
+        alert(`Order status changed to ${newStatus}`)
+      }
+    } catch (e) {
+      const errorMessage = e?.message || 'Failed to change status.'
+      console.error('[Orders] Failed to change status:', e)
+      // Use toast for user-friendly error notification
+      try {
+        toast.notify({ type: 'error', message: errorMessage })
+      } catch (_) {
+        // Fallback in case toast context is unavailable
+        alert(`Error: ${errorMessage}`)
+      }
+    }
+  }
+
+  const onPublish = async (order) => {
+    try {
+      // Publish to MWL - this would call backend API
+      alert(`Publishing order ${order.accession_no} to DICOM MWL...`)
+      // In real implementation:
+      // await api.publishToMWL(order.id)
+      // refresh()
+    } catch (e) {
+      alert(`Failed to publish: ${e.message}`)
+    }
+  }
+
+  /**
+   * Send eligible files for a single order to SatuSehat
+   */
+  const sendOrderToSatuSehat = async (order) => {
+    if (!order || !order.id) return
+
+    if (sendingOrders.includes(order.id)) return
+    setSendingOrders(prev => [...prev, order.id])
+
+    try {
+      // ensure files are loaded (on-demand)
+      const files = orderFilesMap[order.id] || await loadFilesForOrder(order.id)
+      if (!files || files.length === 0) {
+        alert('No files attached to this order to send')
+        return
+      }
+
+      // Filter eligible files: images or DICOM and not already sent/pending
+      const eligible = files.filter(f => {
+        const isDicom = (f.filename || '').toLowerCase().endsWith('.dcm') || (f.file_type || '').includes('dicom')
+        const isImage = (f.filename || '').toLowerCase().match(/\.(jpg|jpeg|png|gif|webp|bmp)$/)
+        if (!isDicom && !isImage) return false
+        const status = f.satusehat?.status
+        return status !== 'sent' && status !== 'pending'
+      })
+
+      if (eligible.length === 0) {
+        alert('No eligible files to send (all files already sent or pending)')
+        return
+      }
+
+      for (const f of eligible) {
+        try {
+          await satusehatService.sendFile(order.id, f)
+        } catch (err) {
+          console.error('[Orders] sendFile error', err)
+        }
+      }
+
+      // Refresh orders and file lists
+      refresh()
+      // Clear cached files for this order so next view will re-fetch fresh metadata
+      setOrderFilesMap(prev => ({ ...prev, [order.id]: undefined }))
+      alert(`Sent ${eligible.length} file(s) for order ${order.accession_no}`)
+    } catch (e) {
+      console.error('[Orders] sendOrderToSatuSehat failed', e)
+      alert(`Failed to send files: ${e.message}`)
+    } finally {
+      setSendingOrders(prev => prev.filter(id => id !== order.id))
+    }
+  }
+
+  /**
+   * Send pending files across all orders (useful dashboard control)
+   */
+  const sendAllPending = async () => {
+    // Iterate orders and load files on demand when needed
+    for (const r of rows) {
+      const files = orderFilesMap[r.id] || await loadFilesForOrder(r.id)
+      const hasEligible = (files || []).some(f => {
+        const isDicom = (f.filename || '').toLowerCase().endsWith('.dcm') || (f.file_type || '').includes('dicom')
+        const isImage = (f.filename || '').toLowerCase().match(/\.(jpg|jpeg|png|gif|webp|bmp)$/)
+        if (!isDicom && !isImage) return false
+        const status = f.satusehat?.status
+        // Eligible if not already sent or currently pending. Cancelled should be eligible.
+        return status !== 'sent' && status !== 'pending'
+      })
+      if (hasEligible) await sendOrderToSatuSehat(r)
+    }
+  }
+
+  // Preflight: check if order has required fields to send to SatuSehat
+  const isOrderSendable = (order) => {
+    if (!order) return false
+    // must have requested procedure
+    const hasProcedure = !!(order.requested_procedure || order.service_request || order.procedure)
+    // must have patient IHS (enriched as _patientIhs) or order field hint
+    const hasIhs = !!(order._patientIhs || order.patient_ihs || order.patient_ihs_number)
+    return hasProcedure && hasIhs
+  }
+
+  // Check whether order has any eligible files to send (including cancelled files)
+  const hasEligibleFiles = (order) => {
+    const files = orderFilesMap[order.id]
+    // If we have cached files, evaluate eligibility
+    if (files && files.length > 0) {
+      return files.some(f => {
+        const isDicom = (f.filename || '').toLowerCase().endsWith('.dcm') || (f.file_type || '').includes('dicom')
+        const isImage = (f.filename || '').toLowerCase().match(/\.(jpg|jpeg|png|gif|webp|bmp)$/)
+        if (!isDicom && !isImage) return false
+        const status = f.satusehat?.status
+        // Eligible if not already sent or currently pending. Cancelled should be eligible.
+        return status !== 'sent' && status !== 'pending'
+      })
+    }
+    // If we don't have cached files, fall back to legacy attachments metadata (optimistic)
+    if (order.attachments && order.attachments.length > 0) return true
+    return false
+  }
+
+  const filtered = useMemo(() => rows.filter(r =>
+    (!q || (r.patient_name.toLowerCase().includes(q.toLowerCase()) || r.accession_no.includes(q))) &&
+    (!status || r.status === status)
+  ), [rows, q, status])
+
+  // Load config asynchronously
+  useEffect(() => {
+    const loadConfig = async () => {
+      const config = await getConfig();
+      setAppConfig(config);
+    };
+    loadConfig();
+  }, []);
+
+  if (!rows || !appConfig) return <LoadingScreen message="Loading orders..." />;
+
+  const backendEnabled = appConfig.backendEnabled;
+  const storageType = backendEnabled ? 'external' : (storageConfig.mode === 'server' ? 'server' : 'browser');
+
+  // Count offline orders
+  const offlineOrdersCount = rows.filter(r => r._offline).length;
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold">Orders</h1>
+          <StorageIndicator storageType={storageType} />
+        </div>
+        <div className="flex gap-2 items-center flex-wrap">
+          <input className="border rounded px-3 py-2 text-sm" placeholder="Search patient / accession" value={q} onChange={e => setQ(e.target.value)} />
+          <select className="border rounded px-3 py-2 text-sm" value={status} onChange={e => setStatus(e.target.value)}>
+            <option value="">All Status</option>
+            {getAllStatuses(false).map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+          </select>
+          <Link to="/orders/new" className="px-3 py-2 rounded bg-blue-600 text-white text-sm">Create</Link>
+          <Link to="/orders/workflow" className="px-3 py-2 rounded bg-purple-600 text-white text-sm" title="View workflow documentation">Workflow</Link>
+          <button type="button" onClick={refresh} className="px-3 py-2 rounded bg-slate-200 text-sm">Refresh</button>
+
+          {/* Sync All Offline Orders Button - Only show when there are offline orders */}
+          {offlineOrdersCount > 0 && (
+            <button
+              type="button"
+              onClick={syncAllOfflineOrders}
+              className="px-3 py-2 rounded bg-amber-600 text-white text-sm hover:bg-amber-700 transition-colors flex items-center gap-2"
+              title={`Sync ${offlineOrdersCount} offline order(s) to backend`}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              Sync All ({offlineOrdersCount})
+            </button>
+          )}
+
+          {/* Column Visibility Dropdown */}
+          <div className="relative" id="column-visibility-dropdown">
+            <button
+              className="px-3 py-2 rounded bg-slate-200 text-sm flex items-center"
+              onClick={() => setShowColumnMenu(!showColumnMenu)}
+            >
+              <span>Columns</span>
+              <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            {showColumnMenu && (
+              <div className="absolute right-0 mt-1 w-48 bg-white border border-slate-200 rounded shadow-lg z-10">
+                {columnVisibility.map(col => (
+                  <label key={col.key} className="flex items-center px-4 py-2 hover:bg-slate-50 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="mr-2"
+                      checked={col.visible}
+                      onChange={() => toggleColumnVisibility(col.key)}
+                    />
+                    <span className="text-sm">{col.label}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={testBackendConnection}
+            disabled={backendTest.status === 'running'}
+            className={`px-3 py-2 rounded text-sm ${backendTest.status === 'running' ? 'bg-amber-200 text-amber-800 cursor-not-allowed' : 'bg-amber-500 text-white hover:bg-amber-600'}`}
+          >
+            {backendTest.status === 'running' ? 'Testing...' : 'Test Backend'}
+          </button>
+          {backendTest.status === 'success' && (
+            <span className="text-xs text-emerald-700">
+              OK | {backendTest.total ?? 0} orders | {((backendTest.durationMs ?? 0) / 1000).toFixed(2)}s
+            </span>
+          )}
+          {backendTest.status === 'error' && backendTest.message && (
+            <span className="text-xs text-red-600" title={backendTest.message}>
+              Failed
+            </span>
+          )}
+          <Link to="/satusehat-monitor" className="px-3 py-2 rounded bg-emerald-600 text-white text-sm">SatuSehat Monitor</Link>
+          {/* <button type="button" onClick={sendAllPending} className="px-3 py-2 rounded bg-emerald-600 text-white text-sm" title="Send pending files for all orders">Send SatuSehat (All)</button> */}
+        </div>
+      </div>
+
+      {/* Legend */}
+      {/* <div className="mb-4 p-3 bg-slate-50 border border-slate-200 rounded">
+         <div className="text-xs font-semibold text-slate-700 mb-2">Legend:</div>
+         <div className="flex flex-wrap gap-4 text-xs">
+           <div className="flex items-center gap-2">
+             <div className="w-6 h-4 bg-amber-50 border border-amber-200 rounded"></div>
+             <span className="text-slate-600">Offline Order (stored locally)</span>
+           </div>
+           <div className="flex items-center gap-2">
+             <div className="px-2 py-0.5 rounded bg-amber-200 text-amber-800 font-mono text-xs">OFFLINE</div>
+             <span className="text-slate-600">Not synced to backend</span>
+           </div>
+           <div className="flex items-center gap-2">
+             <div className="w-6 h-4 bg-white border border-slate-200 rounded"></div>
+             <span className="text-slate-600">Backend Order (server data)</span>
+           </div>
+         </div>
+       </div> */}
+
+      <div className="card overflow-auto">
+        <table className="table text-sm">
+          <thead>
+            <tr>
+              {columnVisibility.filter(col => col.visible).map(col => (
+                <th key={col.key} className="text-xs">{col.label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((r, index) => (
+              <tr key={r.id} className={`text-xs ${r._offline ? 'bg-amber-50' : ''}`}>
+                {columnVisibility.find(col => col.key === 'index')?.visible && <td>{index + 1}</td>}
+                {columnVisibility.find(col => col.key === 'order_number')?.visible && <td>{r.order_number || '—'}</td>}
+                {columnVisibility.find(col => col.key === 'patient_name')?.visible && (
+                  <td>
+                    <div className="font-medium">{r.patient_name}</div>
+                    <div className="text-xs text-slate-500">{r.patient_id ? `${r.patient_id.substring(0, 3)}****${r.patient_id.substring(r.patient_id.length - 3)}` : ''}</div>
+                  </td>
+                )}
+                {columnVisibility.find(col => col.key === 'requested_procedure')?.visible && (
+                  <td>
+                    <div>{r.requested_procedure || r.procedure_name || r.procedureName || r.procedure_description || r.service_request || '—'}</div>
+                  </td>
+                )}
+                {columnVisibility.find(col => col.key === 'scheduled')?.visible && (
+                  <td className="text-sm">
+                    {formatDateTimeForDisplay(r.scheduled_start_at || r.scheduled_at || r.scheduledStartAt || r.scheduled_time)}
+                    {/* Debug: Show clickable debug icon when schedule is missing */}
+                    {!(r.scheduled_start_at || r.scheduled_at || r.scheduledStartAt || r.scheduled_time) && (
+                      <span
+                        className="text-xs text-red-600 cursor-pointer ml-2"
+                        onClick={() => {
+                          console.log(`[Orders Debug] Order ${r.order_number || r.id}:`, r);
+                          console.log('[Orders Debug] Available keys:', Object.keys(r));
+                          alert(`Debug info logged to console for order ${r.order_number || r.id}`);
+                        }}
+                        title="Click to log order data to console"
+                      >
+                        🔍
+                      </span>
+                    )}
+                  </td>
+                )}
+                {columnVisibility.find(col => col.key === 'status')?.visible && (
+                  <td><StatusBadge status={r.status} showIcon={true} /></td>
+                )}
+                {columnVisibility.find(col => col.key === 'accession_number')?.visible && (
+                  <td>{r.accession_number || '—'}</td>
+                )}
+                {columnVisibility.find(col => col.key === 'medical_record_number')?.visible && (
+                  <td>{r.medical_record_number || '—'}</td>
+                )}
+                {columnVisibility.find(col => col.key === 'modality')?.visible && (
+                  <td>{r.modality || '—'}</td>
+                )}
+                {columnVisibility.find(col => col.key === 'actions')?.visible && (
+                  <td className="text-center">
+                    <div className="inline-flex justify-center">
+                      <OrderActionButtons
+                        order={r}
+                        onDelete={onDelete}
+                        onChangeStatus={onChangeStatus}
+                        onPublish={onPublish}
+                        onSync={syncOfflineOrder}
+                        syncingOrders={syncingOrders}
+                      />
+                    </div>
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}

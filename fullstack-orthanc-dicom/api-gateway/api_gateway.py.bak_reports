@@ -1,0 +1,2200 @@
+"""
+API Gateway - Centralized Authentication & Routing
+SECURED VERSION dengan akses Orthanc Web UI dan RBAC Support
+
+Routes requests to appropriate services with JWT validation
+Version: 2.2.0 - Production Ready with Enhanced RBAC Support
+"""
+
+import os
+import sys
+import logging
+from flask import Flask, request, jsonify, Response, make_response
+from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+import jwt
+import requests
+from functools import wraps
+import socket
+
+def check_tcp_port(host, port, timeout=1):
+    """Check if TCP port is open"""
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except (socket.timeout, ConnectionRefusedError, OSError):
+        return False
+
+# Logging configuration
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    stream=sys.stdout
+)
+
+logger = logging.getLogger(__name__)
+app = Flask(__name__)
+CORS(app)
+
+# Rate limiting (configurable)
+GATEWAY_GLOBAL_LIMITS = os.getenv("GATEWAY_GLOBAL_LIMITS", "1000 per hour;60 per minute")
+GATEWAY_LIMITER_STORAGE_URI = os.getenv("GATEWAY_LIMITER_STORAGE_URI", "memory://")
+GATEWAY_LOGIN_LIMIT = os.getenv("GATEWAY_LOGIN_LIMIT", "10 per minute")
+GATEWAY_REGISTER_LIMIT = os.getenv("GATEWAY_REGISTER_LIMIT", "20 per hour")
+GATEWAY_VERIFY_LIMIT = os.getenv("GATEWAY_VERIFY_LIMIT", "120 per minute")
+
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address,
+    default_limits=[limit.strip() for limit in GATEWAY_GLOBAL_LIMITS.split(";") if limit.strip()],
+    storage_uri=GATEWAY_LIMITER_STORAGE_URI
+)
+
+# Configuration
+JWT_SECRET = os.getenv('JWT_SECRET', 'change-this-secret-key')
+JWT_ALGORITHM = 'HS256'
+ALLOW_ORTHANC_UI_PUBLIC = os.getenv('ALLOW_ORTHANC_UI_PUBLIC', 'true').lower() == 'true'
+ADMIN_USERNAME = os.getenv('ADMIN_USERNAME', 'admin')
+ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'Admin@12345')
+
+# Service URLs (internal network)
+AUTH_SERVICE_URL = os.getenv('AUTH_SERVICE_URL', 'http://auth-service:5000')
+MWL_SERVICE_URL = os.getenv('MWL_SERVICE_URL', 'http://mwl-writer:8000')
+MWL_UI_SERVICE_URL = os.getenv('MWL_UI_SERVICE_URL', 'http://mwl-ui:8000')
+ORTHANC_SERVICE_URL = os.getenv('ORTHANC_SERVICE_URL', 'http://orthanc-proxy:8043')
+ORDER_SERVICE_URL = os.getenv('ORDER_SERVICE_URL', 'http://order-management:8001')
+ORTHANC_WEB_URL = os.getenv('ORTHANC_WEB_URL', 'http://orthanc:8042')
+# Additional service URLs
+MODALITY_SIMULATOR_URL = os.getenv('MODALITY_SIMULATOR_URL', 'http://modality-simulator:8090')
+ACCESSION_API_URL = os.getenv('ACCESSION_API_URL', 'http://accession-api:8180')
+DICOM_ROUTER_URL = os.getenv('DICOM_ROUTER_URL', 'http://dicom-router:11112')
+SATUSEHAT_INTEGRATOR_URL = os.getenv('SATUSEHAT_INTEGRATOR_URL', 'http://satusehat-integrator:8081')
+SIMRS_BRIDGE_URL = os.getenv('SIMRS_BRIDGE_URL', 'http://simrs-bridge:8089')
+# Master Data Service
+MASTER_DATA_SERVICE_URL = os.getenv('MASTER_DATA_SERVICE_URL', 'http://master-data-service:8002')
+
+# Optional services toggles
+ENABLE_MODALITY_SIMULATOR = os.getenv('ENABLE_MODALITY_SIMULATOR', 'false').lower() == 'true'
+ENABLE_SIMRS_BRIDGE = os.getenv('ENABLE_SIMRS_BRIDGE', 'true').lower() == 'true'
+
+def get_client_ip(req: request) -> str:
+    """
+    Determine real client IP for forwarding/audit:
+    - Use X-Forwarded-For if already set (keep existing chain, append if needed)
+    - Else use X-Real-IP
+    - Else use req.remote_addr
+    """
+    try:
+        # If behind another proxy/reverse-proxy, it might have set X-Forwarded-For
+        xff = req.headers.get("X-Forwarded-For", "").strip()
+        if xff:
+            # Take first IP in chain as original client
+            first_ip = xff.split(",")[0].strip()
+            if first_ip:
+                return first_ip
+
+        x_real = req.headers.get("X-Real-IP", "").strip()
+        if x_real:
+            return x_real
+
+        return req.remote_addr or ""
+    except Exception:
+        return req.remote_addr or ""
+
+
+def validate_token(token):
+    """Validate JWT token"""
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM], leeway=120)
+        return payload
+    except jwt.ExpiredSignatureError:
+        logger.warning("JWT expired during validation")
+        return None
+    except jwt.InvalidTokenError as e:
+        logger.warning(f"JWT invalid during validation: {str(e)}")
+        return None
+
+
+def is_superadmin_or_dev(user: dict) -> bool:
+    """
+    Determine if user is allowed to manage or view highly sensitive RBAC data.
+
+    Rules (lebih ketat):
+    - Memiliki '*' di permissions (global superadmin), ATAU
+    - Memiliki role 'superadmin' (case-insensitive), ATAU
+    - Memiliki role 'developer' (case-insensitive).
+
+    Catatan:
+    - 'system:admin' TIDAK lagi otomatis dianggap superadmin penuh.
+      Admin dengan 'system:admin' tetap bisa mengakses endpoint tertentu
+      (misalnya /auth/permissions via require_auth),
+      tetapi akan melewati jalur yang mem-filter permission '*' agar tidak terekspos.
+    """
+    if not user:
+        return False
+
+    perms = user.get("permissions") or []
+    roles = [r.lower() for r in (user.get("roles") or [])]
+
+    # Global wildcard: superadmin absolut
+    if "*" in perms:
+        return True
+
+    # Role-based superadmin/developer
+    if "superadmin" in roles:
+        return True
+    if "developer" in roles:
+        return True
+
+    return False
+
+def check_permission(user_permissions, required_permissions):
+    """
+    Check if user has any of the required permissions
+    Supports wildcard permissions (*, category:*)
+    """
+    if not required_permissions:
+        return True
+
+    # Admin wildcard permission
+    if '*' in user_permissions:
+        return True
+
+    # Check each required permission
+    for required in required_permissions:
+        # Direct match
+        if required in user_permissions:
+            return True
+
+        # Check category wildcard (e.g., 'patient:*' for 'patient:read')
+        if ':' in required:
+            category = required.split(':')[0]
+            category_wildcard = f"{category}:*"
+            if category_wildcard in user_permissions:
+                return True
+
+    return False
+
+def require_auth(required_permissions=[]):
+    """
+    Decorator to require authentication and optionally check permissions
+
+    Args:
+        required_permissions: List of permission strings (OR logic - any match grants access)
+
+    Permission System:
+        - '*' = Admin wildcard (grants all permissions)
+        - 'category:*' = Category wildcard (e.g., 'patient:*' grants patient:read, patient:write, etc.)
+        - 'category:action' = Specific permission (e.g., 'patient:read')
+    """
+    def decorator(f):
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            # Allow CORS preflight without auth
+            if request.method == 'OPTIONS':
+                return ('', 204)
+
+            auth_header = request.headers.get('Authorization')
+            if not auth_header or not auth_header.startswith('Bearer '):
+                logger.warning(f"Missing authorization header for {request.path}")
+                return jsonify({
+                    "status": "error",
+                    "message": "Missing or invalid authorization header"
+                }), 401
+
+            token = auth_header.split(' ')[1]
+            user = validate_token(token)
+
+            if not user:
+                logger.warning(f"Invalid token for {request.path}")
+                return jsonify({
+                    "status": "error",
+                    "message": "Invalid or expired token"
+                }), 401
+
+            # Check permissions with enhanced logic
+            if required_permissions:
+                user_permissions = user.get('permissions', [])
+
+                if not check_permission(user_permissions, required_permissions):
+                    logger.warning(
+                        f"Permission denied for user {user.get('username')} on {request.path}. "
+                        f"Required: {required_permissions}, Has: {user_permissions}"
+                    )
+                    return jsonify({
+                        "status": "error",
+                        "message": "Insufficient permissions",
+                        "required": required_permissions,
+                        "hint": "Contact administrator to request access"
+                    }), 403
+
+            # Add user to request context
+            request.current_user = user
+            return f(*args, **kwargs)
+        return decorated
+    return decorator
+
+def proxy_request(service_url, path, method, headers=None, data=None, raw_data=None, params=None):
+    """Proxy request to backend service with proper forwarding headers"""
+    try:
+        url = f"{service_url}/{path}"
+        safe_params = dict(params or {})
+        logger.info(f"[gateway] proxy {method} {url} params={safe_params}")
+
+        if headers is None:
+            headers = {}
+
+        # Forward authorization header unless explicitly overridden
+        auth_header = request.headers.get('Authorization')
+        if auth_header and 'Authorization' not in headers:
+            headers['Authorization'] = auth_header
+
+        # Forward real client IP:
+        # - If incoming request already has X-Forwarded-For (e.g., from outer proxy), append our remote_addr.
+        # - Else, start chain with client IP resolved by get_client_ip.
+        client_ip = get_client_ip(request)
+        existing_xff = request.headers.get("X-Forwarded-For")
+        if existing_xff:
+            headers["X-Forwarded-For"] = f"{existing_xff}, {client_ip}"
+        else:
+            headers["X-Forwarded-For"] = client_ip
+
+        # Also set/override X-Real-IP for backend services
+        headers["X-Real-IP"] = client_ip
+
+        # Forward original User-Agent separately so backend can audit real client agent
+        original_ua = request.headers.get("User-Agent")
+        if original_ua:
+            headers["X-Original-User-Agent"] = original_ua
+
+        request_kwargs = {
+            'method': method,
+            'url': url,
+            'headers': headers,
+            'params': params,
+            'timeout': 30
+        }
+
+        if raw_data is not None:
+            request_kwargs['data'] = raw_data
+        else:
+            request_kwargs['json'] = data
+
+        response = requests.request(**request_kwargs)
+        ct = response.headers.get('Content-Type', '')
+        logger.info(f"[gateway] proxy -> {response.status_code} {url}")
+
+        if response.status_code >= 400:
+            body_snippet = ''
+            try:
+                if ('json' in ct) or ('text' in ct):
+                    body_snippet = response.text[:512]
+                else:
+                    body_snippet = f"<{len(response.content)} bytes>"
+            except Exception:
+                body_snippet = '<unreadable body>'
+            logger.warning(
+                f"[gateway] proxy error {method} {url} "
+                f"status={response.status_code} body={body_snippet}"
+            )
+
+        return Response(response.content, status=response.status_code, headers=dict(response.headers))
+
+    except requests.exceptions.RequestException as e:
+        logger.error(f"[gateway] proxy exception {method} {service_url}/{path}: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "message": "Service unavailable",
+            "detail": str(e)
+        }), 503
+
+
+def get_satusehat_config_from_settings():
+    """
+    Load SatuSehat configuration from settings table (integration_registry.satusehat).
+
+    Expected structure:
+      {
+        "integration_registry": {
+          "satusehat": {
+            "env": "sandbox",
+            "scope": "",
+            "enabled": true,
+            "clientId": "...",
+            "clientSecret": "...",
+            "tokenEndpoint": "...",
+            "organizationId": "...",
+            "timeoutMs": 10000
+          }
+        }
+      }
+
+    Returns dict or (None, error_message).
+    """
+    try:
+        # Prefer dedicated key if available
+        resp = requests.get(
+            f"{MASTER_DATA_SERVICE_URL}/settings/integration_registry",
+            timeout=10
+        )
+
+        if resp.status_code == 404:
+            # Fall back to full settings and extract key
+            resp = requests.get(f"{MASTER_DATA_SERVICE_URL}/settings", timeout=10)
+
+        if resp.status_code != 200:
+            logger.error(f"[satusehat] Failed to fetch settings, status={resp.status_code}")
+            return None, f"Failed to fetch settings (status {resp.status_code})"
+
+        data = resp.json()
+
+        # Try various shapes safely
+        integration_registry = None
+        if isinstance(data, dict):
+            if "integration_registry" in data:
+                integration_registry = data.get("integration_registry")
+            elif "value" in data and isinstance(data.get("value"), dict):
+                # Some settings APIs return { key, value }
+                val = data.get("value") or {}
+                integration_registry = val.get("integration_registry", val)
+            elif data.get("key") == "integration_registry" and "value" in data:
+                integration_registry = data.get("value")
+
+        if not integration_registry or not isinstance(integration_registry, dict):
+            logger.error("[satusehat] integration_registry not found in settings")
+            return None, "integration_registry not found in settings"
+
+        satusehat_cfg = integration_registry.get("satusehat")
+        if not satusehat_cfg or not isinstance(satusehat_cfg, dict):
+            logger.error("[satusehat] satusehat config not found under integration_registry")
+            return None, "satusehat config not found under integration_registry"
+
+        if not satusehat_cfg.get("enabled", False):
+            return None, "satusehat integration is disabled in settings"
+
+        required = ["clientId", "clientSecret", "tokenEndpoint"]
+        missing = [k for k in required if not satusehat_cfg.get(k)]
+        if missing:
+            return None, f"Missing satusehat config fields: {', '.join(missing)}"
+
+        return satusehat_cfg, None
+
+    except requests.RequestException as e:
+        logger.error(f"[satusehat] Error fetching settings: {e}")
+        return None, f"Failed to fetch settings: {e}"
+    except ValueError as e:
+        logger.error(f"[satusehat] Invalid JSON in settings response: {e}")
+        return None, "Invalid JSON in settings response"
+
+# ============================================================================
+# ROOT & HEALTH ROUTES
+# ============================================================================
+
+@app.route('/', methods=['GET'])
+def index():
+    return jsonify({
+        "service": "API Gateway",
+        "version": "2.2.0 - Production Ready with Enhanced RBAC",
+        "status": "running",
+        "security": "All services accessed through this gateway only",
+        "features": [
+            "JWT Authentication with RBAC",
+            "Role-Based Access Control (RBAC)",
+            "Permission Management",
+            "User Management",
+            "Centralized Auth Proxy",
+            "Rate Limiting",
+            "CORS Support"
+        ],
+        "endpoints": {
+            "auth": {
+                "login": "POST /auth/login",
+                "register": "POST /auth/register",
+                "verify": "POST /auth/verify",
+                "profile": "GET /auth/me",
+                "users": "/auth/users/*",
+                "roles": "/auth/roles/*",
+                "permissions": "/auth/permissions/*"
+            },
+            "worklist": "/worklist/*",
+            "orders": "/orders/*",
+            "accession": "/accession/*",
+            "master_data": {
+                "patients": "/patients/*",
+                "doctors": "/doctors/*",
+                "settings": "/settings/*",
+                "patient_search": "GET /patients/search",
+                "doctor_search": "GET /doctors/search"
+            },
+            "orthanc_api": "/orthanc/*",
+            "orthanc_web_ui": "/orthanc-ui/*",
+            "satusehat": "/satusehat/*"
+        },
+        "documentation": "https://github.com/yourorg/docs"
+    }), 200
+
+@app.route('/health', methods=['GET'])
+def health():
+    detailed = request.args.get('detailed', 'false').lower() == 'true'
+    services_health = {}
+
+    services = {
+        "auth": {"url": AUTH_SERVICE_URL, "health_path": "/health"},
+        "mwl": {"url": MWL_SERVICE_URL, "health_path": "/health"},
+        "orthanc": {"url": ORTHANC_SERVICE_URL, "health_path": "/health"},
+        "orders": {"url": ORDER_SERVICE_URL, "health_path": "/health"},
+        "accession-api": {"url": ACCESSION_API_URL, "health_path": "/healthz"},
+        "dicom-router": {"url": DICOM_ROUTER_URL, "health_path": None, "tcp_port": 11112},
+        "satusehat-integrator": {"url": SATUSEHAT_INTEGRATOR_URL, "health_path": "/health"},
+        "master-data-service": {"url": MASTER_DATA_SERVICE_URL, "health_path": "/health"}
+    }
+
+    if ENABLE_MODALITY_SIMULATOR:
+        services["modality-simulator"] = {"url": MODALITY_SIMULATOR_URL, "health_path": "/health"}
+
+    #if ENABLE_SIMRS_BRIDGE:
+    #    services["simrs-bridge"] = {"url": SIMRS_BRIDGE_URL, "health_path": "/health"}
+
+    for name, service_info in services.items():
+        url = service_info["url"]
+        health_path = service_info["health_path"]
+        tcp_port = service_info.get("tcp_port")
+
+        if health_path is None and tcp_port is None:
+            if detailed:
+                services_health[name] = {"status": "not applicable", "message": "No health endpoint"}
+            else:
+                services_health[name] = "not applicable"
+            continue
+
+        if health_path is None and tcp_port is not None:
+            host = url.split('://')[1].split(':')[0]
+            if check_tcp_port(host, tcp_port):
+                if detailed:
+                    services_health[name] = {"status": "healthy", "type": "TCP", "port": tcp_port}
+                else:
+                    services_health[name] = "healthy"
+            else:
+                if detailed:
+                    services_health[name] = {"status": "unreachable", "type": "TCP", "port": tcp_port}
+                else:
+                    services_health[name] = "unreachable"
+            continue
+
+        try:
+            endpoint = f"{url}{health_path}"
+            if detailed:
+                endpoint += "?detailed=true"
+            
+            r = requests.get(endpoint, timeout=5)
+            
+            if r.status_code == 200:
+                if detailed:
+                    try:
+                        services_health[name] = r.json()
+                    except ValueError:
+                        services_health[name] = {"status": "healthy", "response": r.text.strip()}
+                else:
+                    services_health[name] = "healthy"
+            else:
+                if detailed:
+                    services_health[name] = {"status": "unhealthy", "statusCode": r.status_code}
+                else:
+                    services_health[name] = "unhealthy"
+        except requests.exceptions.RequestException as e:
+            if detailed:
+                services_health[name] = {"status": "unreachable", "error": str(e)}
+            else:
+                services_health[name] = "unreachable"
+
+    return jsonify({
+        "status": "healthy",
+        "service": "api-gateway",
+        "version": "2.2.0",
+        "services": services_health
+    }), 200
+
+# ============================================================================
+# AUTH ROUTES - Enhanced with RBAC Support
+# ============================================================================
+
+# ===== Public Auth Endpoints (No Auth Required) =====
+
+@app.route('/auth/login', methods=['POST'])
+@limiter.limit(lambda: GATEWAY_LOGIN_LIMIT)
+def auth_login():
+    """Login endpoint - no auth required"""
+    return proxy_request(AUTH_SERVICE_URL, 'auth/login', 'POST', data=request.get_json(silent=True))
+
+@app.route('/auth/verify', methods=['POST'])
+@limiter.limit(lambda: GATEWAY_VERIFY_LIMIT)
+def auth_verify():
+    """Verify token via auth-service - no auth required"""
+    return proxy_request(AUTH_SERVICE_URL, 'auth/verify', 'POST', data=request.get_json(silent=True))
+
+@app.route('/auth/register', methods=['POST'])
+@limiter.limit(lambda: GATEWAY_REGISTER_LIMIT)
+def auth_register_public():
+    """Public user registration endpoint (if enabled)"""
+    return proxy_request(AUTH_SERVICE_URL, 'auth/register', 'POST', data=request.get_json(silent=True))
+
+# ===== User Profile Endpoints =====
+
+@app.route('/auth/me', methods=['GET'])
+@require_auth()
+def auth_me():
+    """Get current user profile"""
+    return proxy_request(AUTH_SERVICE_URL, 'auth/me', 'GET')
+
+@app.route('/auth/change-password', methods=['POST'])
+@require_auth()
+def auth_change_password():
+    """Change current user password"""
+    return proxy_request(AUTH_SERVICE_URL, 'auth/change-password', 'POST', data=request.get_json(silent=True))
+
+# ===== User Management Endpoints (Admin) =====
+
+@app.route('/auth/users', methods=['GET'])
+@require_auth(['user:read', 'user:manage', '*'])
+def auth_users_list():
+    """
+    List all users.
+
+    Akses dikontrol oleh permission:
+    - Diizinkan jika user memiliki salah satu:
+      - user:read
+      - user:manage
+      - atau '*' (via require_auth)
+
+    Catatan:
+    - Tidak lagi diwajibkan is_superadmin_or_dev.
+    - Admin tanpa '*' tapi dengan user:manage tetap bisa melihat daftar user.
+    """
+    return proxy_request(AUTH_SERVICE_URL, 'auth/users', 'GET', params=request.args)
+
+@app.route('/auth/users', methods=['POST'])
+@require_auth(['user:create', 'user:manage', '*'])
+def auth_users_create():
+    """Create new user - requires user:create permission"""
+    return proxy_request(AUTH_SERVICE_URL, 'auth/users', 'POST', data=request.get_json(silent=True))
+
+@app.route('/auth/users/<user_id>', methods=['GET'])
+@require_auth(['user:read', 'user:manage', '*'])
+def auth_users_get(user_id):
+    """Get user by ID - requires user:read permission"""
+    return proxy_request(AUTH_SERVICE_URL, f'auth/users/{user_id}', 'GET')
+
+@app.route('/auth/users/<user_id>', methods=['PUT'])
+@require_auth(['user:update', 'user:manage', '*'])
+def auth_users_update(user_id):
+    """Update user - requires user:update permission"""
+    return proxy_request(AUTH_SERVICE_URL, f'auth/users/{user_id}', 'PUT', data=request.get_json(silent=True))
+
+@app.route('/auth/users/<user_id>', methods=['DELETE'])
+@require_auth(['user:delete', 'user:manage', '*'])
+def auth_users_delete(user_id):
+    """Delete user - requires user:delete permission"""
+    return proxy_request(AUTH_SERVICE_URL, f'auth/users/{user_id}', 'DELETE')
+
+@app.route('/auth/users/<user_id>/change-password', methods=['POST'])
+@require_auth(['user:update', 'user:manage', '*'])
+def auth_users_change_password(user_id):
+    """Change user password - requires user:update permission"""
+    return proxy_request(AUTH_SERVICE_URL, f'auth/users/{user_id}/change-password', 'POST',
+                        data=request.get_json(silent=True))
+
+@app.route('/auth/users/<user_id>/activate', methods=['POST'])
+@require_auth(['user:manage', '*'])
+def auth_users_activate(user_id):
+    """Activate user account - requires user:manage permission"""
+    return proxy_request(AUTH_SERVICE_URL, f'auth/users/{user_id}/activate', 'POST')
+
+@app.route('/auth/users/<user_id>/deactivate', methods=['POST'])
+@require_auth(['user:manage', '*'])
+def auth_users_deactivate(user_id):
+    """Deactivate user account - requires user:manage permission"""
+    return proxy_request(AUTH_SERVICE_URL, f'auth/users/{user_id}/deactivate', 'POST')
+
+# ===== Role Management Endpoints (Admin) =====
+
+@app.route('/auth/roles', methods=['GET'])
+@require_auth(['system:admin', '*'])
+def auth_roles_list():
+    """
+    List all roles.
+
+    - Hanya pengguna dengan 'system:admin' atau '*' yang boleh mengakses endpoint ini
+      (divalidasi oleh require_auth).
+    - Superadmin/developer (is_superadmin_or_dev == True):
+      Mendapat daftar lengkap roles langsung dari auth-service.
+    - Admin dengan 'system:admin' tetapi bukan superadmin/developer:
+      Tetap diperbolehkan melihat daftar roles.
+      (Jika suatu saat perlu menyembunyikan role super-sensitif seperti 'superadmin',
+       filtering bisa ditambahkan di sini.)
+    """
+    user = request.current_user
+
+    # Superadmin/developer: akses penuh
+    if is_superadmin_or_dev(user):
+        return proxy_request(AUTH_SERVICE_URL, 'auth/roles', 'GET')
+
+    # Admin biasa dengan system:admin (lolos require_auth) juga boleh melihat roles
+    logger.info(f"RBAC roles list allowed for admin user {user.get('username')}")
+    return proxy_request(AUTH_SERVICE_URL, 'auth/roles', 'GET')
+
+@app.route('/auth/roles', methods=['POST'])
+@require_auth(['system:admin', '*'])
+def auth_roles_create():
+    """Create new role - admin only (superadmin/developer via is_superadmin_or_dev)"""
+    user = request.current_user
+    if not is_superadmin_or_dev(user):
+        logger.warning(f"RBAC create role denied for non-superadmin user {user.get('username')}")
+        return jsonify({
+            "status": "error",
+            "message": "Insufficient role to create roles",
+            "hint": "Only superadmin/developer may create roles"
+        }), 403
+    return proxy_request(AUTH_SERVICE_URL, 'auth/roles', 'POST', data=request.get_json(silent=True))
+
+@app.route('/auth/roles/<role_name>', methods=['GET'])
+@require_auth(['system:admin', '*'])
+def auth_roles_get(role_name):
+    """
+    Get role details - admin only.
+    Dibatasi ke superadmin/developer agar konfigurasi roles sensitif tidak terekspos.
+    """
+    user = request.current_user
+    if not is_superadmin_or_dev(user):
+        logger.warning(f"RBAC get role denied for non-superadmin user {user.get('username')}")
+        return jsonify({
+            "status": "error",
+            "message": "Insufficient role to view this role detail",
+            "hint": "Only superadmin/developer may view role details"
+        }), 403
+    return proxy_request(AUTH_SERVICE_URL, f'auth/roles/{role_name}', 'GET')
+
+@app.route('/auth/roles/<role_name>/users', methods=['GET'])
+@require_auth(['system:admin', '*'])
+def auth_roles_users(role_name):
+    """
+    Get users assigned to role - admin only.
+    Hanya untuk superadmin/developer untuk menghindari kebocoran mapping user-role sensitif.
+    """
+    user = request.current_user
+    if not is_superadmin_or_dev(user):
+        logger.warning(f"RBAC role users list denied for non-superadmin user {user.get('username')}")
+        return jsonify({
+            "status": "error",
+            "message": "Insufficient role to view users of this role",
+            "hint": "Only superadmin/developer may view users of a role"
+        }), 403
+    return proxy_request(AUTH_SERVICE_URL, f'auth/roles/{role_name}/users', 'GET', params=request.args)
+
+@app.route('/auth/roles/<role_id>/permissions', methods=['GET'])
+@require_auth(['system:admin', '*'])
+def auth_roles_permissions_get(role_id):
+    """
+    Get permissions assigned to role - admin only.
+    Dibatasi ke superadmin/developer.
+    """
+    user = request.current_user
+    if not is_superadmin_or_dev(user):
+        logger.warning(f"RBAC role permissions view denied for non-superadmin user {user.get('username')}")
+        return jsonify({
+            "status": "error",
+            "message": "Insufficient role to view role permissions",
+            "hint": "Only superadmin/developer may view role permissions"
+        }), 403
+    return proxy_request(AUTH_SERVICE_URL, f'auth/roles/{role_id}/permissions', 'GET')
+
+@app.route('/auth/roles/<role_id>/permissions', methods=['POST'])
+@require_auth(['system:admin', '*'])
+def auth_roles_permissions_assign(role_id):
+    """Assign permission to role - admin only (superadmin/developer)"""
+    user = request.current_user
+    if not is_superadmin_or_dev(user):
+        logger.warning(f"RBAC assign perm to role denied for non-superadmin user {user.get('username')}")
+        return jsonify({
+            "status": "error",
+            "message": "Insufficient role to modify role permissions",
+            "hint": "Only superadmin/developer may modify role permissions"
+        }), 403
+    return proxy_request(AUTH_SERVICE_URL, f'auth/roles/{role_id}/permissions', 'POST',
+                        data=request.get_json(silent=True))
+
+@app.route('/auth/roles/<role_id>/permissions/<permission_id>', methods=['DELETE'])
+@require_auth(['system:admin', '*'])
+def auth_roles_permissions_remove(role_id, permission_id):
+    """Remove permission from role - admin only (superadmin/developer)"""
+    user = request.current_user
+    if not is_superadmin_or_dev(user):
+        logger.warning(f"RBAC remove perm from role denied for non-superadmin user {user.get('username')}")
+        return jsonify({
+            "status": "error",
+            "message": "Insufficient role to modify role permissions",
+            "hint": "Only superadmin/developer may modify role permissions"
+        }), 403
+    return proxy_request(AUTH_SERVICE_URL, f'auth/roles/{role_id}/permissions/{permission_id}', 'DELETE')
+
+# ===== Permission Management Endpoints (Admin) =====
+
+@app.route('/auth/permissions', methods=['GET'])
+@require_auth(['system:admin', '*'])
+def auth_permissions_list():
+    """
+    List all permissions.
+
+    - Superadmin/developer (is_superadmin_or_dev == True):
+      Mendapatkan daftar lengkap dari auth-service (termasuk '*' jika ada).
+    - Admin dengan system:admin tapi bukan superadmin/developer:
+      Boleh membaca daftar permission, namun permission '*' akan disembunyikan
+      dari hasil response (tidak terekspos ke client tersebut).
+    """
+    user = request.current_user
+
+    # Superadmin/developer: full access
+    if is_superadmin_or_dev(user):
+        return proxy_request(AUTH_SERVICE_URL, 'auth/permissions', 'GET')
+
+    # Non-superadmin: sudah pasti punya system:admin (karena lolos require_auth),
+    # tapi tidak dianggap superadmin/developer. Boleh list, tapi "*" harus difilter.
+    # Teruskan Authorization header agar auth-service tetap mengenali user.
+    try:
+        headers = {}
+        auth_header = request.headers.get("Authorization")
+        if auth_header:
+            headers["Authorization"] = auth_header
+
+        resp = requests.get(
+            f"{AUTH_SERVICE_URL}/auth/permissions",
+            headers=headers,
+            timeout=30
+        )
+    except requests.RequestException as e:
+        logger.error(f"Error fetching permissions from auth-service: {e}")
+        return jsonify({
+            "status": "error",
+            "message": "Failed to fetch permissions"
+        }), 503
+
+    # Jika bukan 200, forward apa adanya
+    if resp.status_code != 200:
+        return Response(resp.content, status=resp.status_code, headers=dict(resp.headers))
+
+    # Coba parse JSON
+    try:
+        data = resp.json()
+    except ValueError:
+        # Kalau bukan JSON, kembalikan apa adanya
+        return Response(resp.content, status=resp.status_code, headers=dict(resp.headers))
+
+    def is_sensitive_perm(item):
+        """
+        Helper untuk deteksi permission yang hanya boleh terlihat oleh superadmin/developer.
+        Saat ini:
+        - "*" (global wildcard)
+        - "setting:dev" (developer-only settings)
+        Bisa diperluas jika ada permission lain yang super-sensitif.
+        """
+        # Ekstrak nama permission dari berbagai kemungkinan bentuk
+        if isinstance(item, str):
+            name = item.strip()
+        elif isinstance(item, dict):
+            name = (item.get("name")
+                    or item.get("code")
+                    or item.get("permission")
+                    or item.get("value")
+                    or "").strip()
+        else:
+            return False
+
+        if name == "*":
+            return True
+        if name.lower() == "setting:dev":
+            return True
+
+        return False
+
+    # Struktur umum 1: { "permissions": [...] }
+    if isinstance(data, dict) and isinstance(data.get("permissions"), list):
+        filtered = [p for p in data["permissions"] if not is_sensitive_perm(p)]
+        data["permissions"] = filtered
+        # Lanjutkan memfilter kategori lain di bawah.
+
+    # Struktur umum 2: ada beberapa kategori sebagai list (misal "system": [...], "user": [...])
+    if isinstance(data, dict):
+        for key, value in list(data.items()):
+            if isinstance(value, list):
+                data[key] = [p for p in value if not is_sensitive_perm(p)]
+        return jsonify(data), 200
+
+    # Kalau langsung list
+    if isinstance(data, list):
+        filtered = [p for p in data if not is_sensitive_perm(p)]
+        return jsonify(filtered), 200
+
+    # Format lain: kembalikan tanpa modifikasi
+    return jsonify(data), 200
+
+@app.route('/auth/permissions', methods=['POST'])
+@require_auth(['system:admin', '*'])
+def auth_permissions_create():
+    """
+    Create new permission.
+
+    Aturan:
+    - Hanya superadmin/developer (is_superadmin_or_dev).
+    - Dilarang membuat permission "*" (global wildcard) melalui API ini.
+      Permission harus spesifik, contoh:
+        - "patient:read"
+        - "doctor:update"
+        - "order:*" (masih diizinkan jika memang konsepnya kategori)
+      Untuk mencegah injeksi paksa wildcard global.
+    """
+    user = request.current_user
+    if not is_superadmin_or_dev(user):
+        logger.warning(f"RBAC perm create denied for non-superadmin user {user.get('username')}")
+        return jsonify({
+            "status": "error",
+            "message": "Insufficient role to create permissions",
+            "hint": "Only superadmin/developer may create permissions"
+        }), 403
+
+    payload = request.get_json(silent=True) or {}
+
+    # Normalisasi nama permission dari berbagai kemungkinan field
+    perm_name = (
+        payload.get("name")
+        or payload.get("permission")
+        or payload.get("code")
+        or payload.get("value")
+    )
+
+    # Jika mencoba membuat permission "*" persis, tolak.
+    if isinstance(perm_name, str) and perm_name.strip() == "*":
+        logger.warning(f"Attempt to create global wildcard permission '*' blocked for user {user.get('username')}")
+        return jsonify({
+            "status": "error",
+            "message": "Global wildcard permission '*' is not allowed via API. Use specific permissions.",
+            "hint": "Define explicit permissions like 'patient:read', 'doctor:update', or scoped wildcards like 'patient:*' if needed."
+        }), 400
+
+    return proxy_request(AUTH_SERVICE_URL, 'auth/permissions', 'POST', data=payload)
+
+@app.route('/auth/permissions/check', methods=['POST'])
+@require_auth()
+def auth_permissions_check():
+    """Check if current user has specific permission"""
+    return proxy_request(AUTH_SERVICE_URL, 'auth/permissions/check', 'POST',
+                        data=request.get_json(silent=True))
+
+# ===== User-Role Management Endpoints =====
+
+@app.route('/auth/users/<user_id>/roles', methods=['GET'])
+@require_auth(['user:read', 'user:manage', '*'])
+def auth_users_roles_get(user_id):
+    """Get roles assigned to user"""
+    return proxy_request(AUTH_SERVICE_URL, f'auth/users/{user_id}/roles', 'GET')
+
+@app.route('/auth/users/<user_id>/roles', methods=['POST'])
+@require_auth(['user:manage', '*'])
+def auth_users_roles_assign(user_id):
+    """Assign role to user - requires user:manage permission"""
+    return proxy_request(AUTH_SERVICE_URL, f'auth/users/{user_id}/roles', 'POST',
+                        data=request.get_json(silent=True))
+
+@app.route('/auth/users/<user_id>/roles/<role_id>', methods=['DELETE'])
+@require_auth(['user:manage', '*'])
+def auth_users_roles_remove(user_id, role_id):
+    """Remove role from user - requires user:manage permission"""
+    return proxy_request(AUTH_SERVICE_URL, f'auth/users/{user_id}/roles/{role_id}', 'DELETE')
+
+# ===== User-Permission Management Endpoints =====
+
+@app.route('/auth/users/<user_id>/permissions', methods=['GET'])
+@require_auth(['user:read', 'user:manage', '*'])
+def auth_users_permissions_get(user_id):
+    """Get permissions assigned to user"""
+    return proxy_request(AUTH_SERVICE_URL, f'auth/users/{user_id}/permissions', 'GET')
+
+@app.route('/auth/users/<user_id>/permissions', methods=['POST'])
+@require_auth(['user:manage', '*'])
+def auth_users_permissions_assign(user_id):
+    """Assign direct permission to user - requires user:manage permission"""
+    return proxy_request(AUTH_SERVICE_URL, f'auth/users/{user_id}/permissions', 'POST',
+                        data=request.get_json(silent=True))
+
+@app.route('/auth/users/<user_id>/permissions/<permission_id>', methods=['DELETE'])
+@require_auth(['user:manage', '*'])
+def auth_users_permissions_remove(user_id, permission_id):
+    """Remove direct permission from user - requires user:manage permission"""
+    return proxy_request(AUTH_SERVICE_URL, f'auth/users/{user_id}/permissions/{permission_id}', 'DELETE')
+
+# ===== Cache Management Endpoints (Admin) =====
+
+@app.route('/auth/cache/clear', methods=['POST'])
+@require_auth(['system:admin', '*'])
+def auth_cache_clear():
+    """Clear permission cache - hanya superadmin/developer."""
+    user = request.current_user
+    if not is_superadmin_or_dev(user):
+        logger.warning(f"RBAC cache clear denied for non-superadmin user {user.get('username')}")
+        return jsonify({
+            "status": "error",
+            "message": "Insufficient role to clear RBAC cache",
+            "hint": "Only superadmin/developer may clear RBAC cache"
+        }), 403
+    return proxy_request(AUTH_SERVICE_URL, 'auth/cache/clear', 'POST', data=request.get_json(silent=True))
+
+@app.route('/auth/cache/stats', methods=['GET'])
+@require_auth(['system:admin', '*'])
+def auth_cache_stats():
+    """Get cache statistics - hanya superadmin/developer."""
+    user = request.current_user
+    if not is_superadmin_or_dev(user):
+        logger.warning(f"RBAC cache stats denied for non-superadmin user {user.get('username')}")
+        return jsonify({
+            "status": "error",
+            "message": "Insufficient role to view RBAC cache stats",
+            "hint": "Only superadmin/developer may view RBAC cache stats"
+        }), 403
+    return proxy_request(AUTH_SERVICE_URL, 'auth/cache/stats', 'GET')
+
+
+@app.route('/auth/audit/logs', methods=['GET'])
+@require_auth()
+def auth_audit_logs_proxy():
+    """
+    Proxy untuk membaca auth_audit_log dari auth-service.
+
+    Security:
+    - Hanya untuk operator dengan hak tinggi:
+        - SUPERADMIN / DEVELOPER / '*' / 'rbac:manage'
+        - atau permission 'system:logs'
+    - Filter & pagination dilakukan oleh auth-service, gateway menambahkan guard ekstra.
+    """
+    user = request.current_user or {}
+    perms = user.get("permissions") or []
+
+    allowed = is_superadmin_or_dev(user) or ("system:logs" in perms) or ("rbac:manage" in perms)
+    if not allowed:
+        logger.warning(
+            f"Auth audit logs access denied for user={user.get('username')} "
+            f"perms={perms}"
+        )
+        return jsonify({
+            "status": "error",
+            "message": "Insufficient privilege to view auth audit logs"
+        }), 403
+
+    # Teruskan query params apa adanya; auth-service akan handle filter/sort/pagination.
+    return proxy_request(AUTH_SERVICE_URL, 'auth/audit/logs', 'GET', params=request.args)
+
+# ===== Catch-all Auth Proxy (for backward compatibility) =====
+
+@app.route('/auth/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE'])
+@require_auth()
+def auth_proxy(path):
+    """
+    Proxy other auth requests (backward compatibility)
+    Requires authentication but no specific permission
+    """
+    return proxy_request(AUTH_SERVICE_URL, f'auth/{path}', request.method,
+                        data=request.get_json(silent=True), params=request.args)
+
+# ============================================================================
+# WORKLIST ROUTES
+# ============================================================================
+
+@app.route('/worklist/create', methods=['POST'])
+@require_auth(['worklist:create', '*'])
+def worklist_create():
+    """Create worklist"""
+    return proxy_request(MWL_SERVICE_URL, 'worklist/create', 'POST', data=request.get_json(silent=True))
+
+@app.route('/worklist/list', methods=['GET'])
+@require_auth(['worklist:read', '*'])
+def worklist_list():
+    """List worklists"""
+    return proxy_request(MWL_SERVICE_URL, 'worklist/list', 'GET', params=request.args)
+
+@app.route('/worklist/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE'])
+@require_auth(['worklist:read', '*'])
+def worklist_proxy(path):
+    """Proxy worklist requests"""
+    return proxy_request(MWL_SERVICE_URL, f'worklist/{path}', request.method,
+                        data=request.get_json(silent=True), params=request.args)
+
+# ============================================================================
+# MWL UI ROUTES - Public access for UI components
+# ============================================================================
+
+@app.route('/mwl-ui', methods=['GET'])
+@app.route('/mwl-ui/', methods=['GET'])
+def mwl_ui_root():
+    """Serve MWL UI main page"""
+    return proxy_request(MWL_UI_SERVICE_URL, '', 'GET')
+
+@app.route('/mwl-ui/health', methods=['GET'])
+def mwl_ui_health():
+    """MWL UI health check - public access"""
+    return proxy_request(MWL_UI_SERVICE_URL, 'health', 'GET')
+
+@app.route('/mwl-ui/config', methods=['GET'])
+def mwl_ui_config():
+    """MWL UI configuration - public access"""
+    return proxy_request(MWL_UI_SERVICE_URL, 'config', 'GET')
+
+@app.route('/mwl-ui/api/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE'])
+@require_auth(['worklist:read', '*'])
+def mwl_ui_api_proxy(path):
+    """Proxy MWL UI API calls with authentication"""
+    return proxy_request(MWL_UI_SERVICE_URL, f'api/{path}', request.method,
+                        data=request.get_json(silent=True), params=request.args)
+
+@app.route('/mwl-ui/<path:path>', methods=['GET'])
+def mwl_ui_static_proxy(path):
+    """Serve MWL UI static files - public access for assets"""
+    return proxy_request(MWL_UI_SERVICE_URL, path, 'GET')
+
+# ============================================================================
+# ORDER MANAGEMENT ROUTES
+# ============================================================================
+
+@app.route('/orders', methods=['GET'])
+@require_auth(['order:read', '*'])
+def orders_list_root():
+    """
+    Normalized root endpoint for listing orders via gateway.
+
+    - GET /orders  -> proxied to Order Management Service: GET /orders/list
+    """
+    return proxy_request(
+        ORDER_SERVICE_URL,
+        'orders/list',
+        'GET',
+        params=request.args
+    )
+
+
+@app.route('/orders', methods=['POST'])
+@require_auth(['order:create', '*'])
+def orders_create_root():
+    """
+    Normalized root endpoint for creating orders via gateway.
+
+    - POST /orders -> proxied to Order Management Service: POST /orders/create
+    """
+    return proxy_request(
+        ORDER_SERVICE_URL,
+        'orders/create',
+        'POST',
+        data=request.get_json(silent=True)
+    )
+
+
+@app.route('/orders/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE'])
+@require_auth()
+def orders_proxy(path):
+    """
+    Proxy order management requests for subpaths under /orders/*.
+
+    Permission mapping (method-based):
+    - GET    -> order:read
+    - POST   -> order:create
+    - PUT    -> order:update
+    - DELETE -> order:delete
+    """
+    user = request.current_user
+    user_perms = user.get('permissions', []) or []
+
+    method_required = {
+        'GET': ['order:read', '*'],
+        'POST': ['order:create', '*'],
+        'PUT': ['order:update', '*'],
+        'DELETE': ['order:delete', '*']
+    }
+    required = method_required.get(request.method, ['order:read', '*'])
+
+    if not check_permission(user_perms, required):
+        logger.warning(
+            f"Permission denied for user {user.get('username')} on {request.method} /orders/{path}. "
+            f"Required: {required}, Has: {user_perms}"
+        )
+        return jsonify({
+            "status": "error",
+            "message": "Permission denied",
+            "required": required
+        }), 403
+
+    # If content-type is multipart/form-data, forward raw body to support file uploads.
+    content_type = (request.headers.get('Content-Type') or '').lower()
+    if content_type.startswith('multipart/form-data'):
+        # Forward multipart body as-is, but strip Host/Content-Length so requests can set them correctly.
+        fwd_headers = {
+            k: v
+            for k, v in request.headers
+            if k.lower() not in ('host', 'content-length')
+        }
+        return proxy_request(
+            ORDER_SERVICE_URL,
+            f'orders/{path}',
+            request.method,
+            headers=fwd_headers,
+            raw_data=request.get_data(),
+            params=request.args
+        )
+
+    # Default: JSON / standard proxy
+    return proxy_request(
+        ORDER_SERVICE_URL,
+        f'orders/{path}',
+        request.method,
+        data=request.get_json(silent=True),
+        params=request.args
+    )
+
+
+@app.route('/orders/<identifier>/files/<file_id>/content', methods=['GET'])
+@require_auth(['order:read', '*'])
+def orders_file_content_proxy(identifier, file_id):
+    """
+    Proxy to download/stream physical order file content via gateway.
+
+    Maps:
+      GET /orders/<identifier>/files/<file_id>/content (gateway)
+      ->  GET /orders/<identifier>/files/<file_id>/content (order-management)
+    """
+    # Forward as-is (no JSON body), preserving query params if any.
+    # Strip Host so downstream requests can set it properly.
+    fwd_headers = {
+        k: v
+        for k, v in request.headers
+        if k.lower() not in ('host', 'content-length')
+    }
+    # Construct relative path used by order-management service
+    om_path = f"orders/{identifier}/files/{file_id}/content"
+    return proxy_request(
+        ORDER_SERVICE_URL,
+        om_path,
+        'GET',
+        headers=fwd_headers,
+        raw_data=None,
+        params=request.args
+    )
+
+# ============================================================================
+# ACCESSION API ROUTES (CONSOLIDATED - NO DUPLICATES)
+# ============================================================================
+
+@app.route('/accession/create', methods=['POST'])
+@require_auth(['accession:create', '*'])
+def accession_create():
+    """Create new accession number"""
+    user = request.current_user
+    logger.info(f"Accession create by user: {user.get('username', 'unknown')}")
+    
+    try:
+        incoming = request.get_json() or {}
+        # Backward-compatible transform
+        if 'patient' in incoming:
+            p = incoming.get('patient') or {}
+            transformed = {
+                'modality': incoming.get('modality') or incoming.get('modalityType') or incoming.get('modality_type'),
+                'procedure_code': incoming.get('procedure_code') or incoming.get('studyDescription'),
+                'procedure_name': incoming.get('procedure_name'),
+                'scheduled_at': incoming.get('scheduled_at'),
+                'patient_national_id': p.get('id'),
+                'patient_name': p.get('name'),
+                'gender': p.get('sex'),
+                'birth_date': p.get('birthDate'),
+                'medical_record_number': p.get('medical_record_number'),
+                'ihs_number': p.get('ihs_number'),
+                'registration_number': incoming.get('registration_number')
+            }
+            payload = transformed
+        else:
+            payload = incoming
+        
+        response = proxy_request(ACCESSION_API_URL, 'accession/create', 'POST', data=payload)
+        logger.info(f"Accession create response: {response.status_code}")
+        return response
+    except Exception as e:
+        logger.error(f"Accession create error: {str(e)}")
+        return jsonify({"status": "error", "message": "Failed to create accession"}), 503
+
+@app.route('/accession/<accession_number>', methods=['GET'])
+@require_auth(['accession:read', '*'])
+def accession_get(accession_number):
+    """Get accession details by number"""
+    user = request.current_user
+    logger.info(f"Accession get {accession_number} by: {user.get('username', 'unknown')}")
+    
+    try:
+        response = proxy_request(ACCESSION_API_URL, f'api/accessions/{accession_number}', 'GET', params=request.args)
+        return response
+    except Exception as e:
+        logger.error(f"Accession get error: {str(e)}")
+        return jsonify({"status": "error", "message": "Failed to retrieve accession"}), 503
+
+@app.route('/accession/verify', methods=['GET'])
+@require_auth(['accession:read', '*'])
+def accession_verify():
+    """Verify accession number integrity"""
+    user = request.current_user
+    accession_number = request.args.get('an', '')
+    logger.info(f"Accession verify {accession_number} by: {user.get('username', 'unknown')}")
+    
+    try:
+        response = proxy_request(ACCESSION_API_URL, 'internal/verify-accession', 'GET', params=request.args)
+        return response
+    except Exception as e:
+        logger.error(f"Accession verify error: {str(e)}")
+        return jsonify({"status": "error", "message": "Failed to verify accession"}), 503
+
+@app.route('/accession/hooks/missing-acc', methods=['POST'])
+@require_auth(['accession:admin', '*'])
+def accession_missing_hook():
+    """Handle missing accession hook (admin only)"""
+    user = request.current_user
+    logger.info(f"Accession missing hook by: {user.get('username', 'unknown')}")
+    
+    try:
+        response = proxy_request(ACCESSION_API_URL, 'api/hooks/missing-acc', 'POST', data=request.get_json(silent=True))
+        return response
+    except Exception as e:
+        logger.error(f"Accession missing hook error: {str(e)}")
+        return jsonify({"status": "error", "message": "Failed to process hook"}), 503
+
+@app.route('/accession/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE'])
+@require_auth()
+def accession_proxy(path):
+    """Proxy accession requests with method-specific permissions"""
+    user = request.current_user
+    user_perms = user.get('permissions', [])
+    
+    method_required = {
+        'GET': ['accession:read', '*'],
+        'POST': ['accession:create', '*'],
+        'PUT': ['accession:update', '*'],
+        'DELETE': ['accession:delete', '*']
+    }
+    required = method_required.get(request.method, ['accession:read', '*'])
+    
+    if not check_permission(user_perms, required):
+            logger.warning(f"Permission denied for {user.get('username')} on {request.method} /accession/{path}")
+            return jsonify({
+                "status": "error",
+                "message": "Permission denied",
+                "required": required
+            }), 403
+    
+    try:
+        response = proxy_request(ACCESSION_API_URL, f'api/{path}', request.method,
+                                data=request.get_json(silent=True), params=request.args)
+        return response
+    except Exception as e:
+        logger.error(f"Accession proxy error: {str(e)}")
+        return jsonify({"status": "error", "message": "Failed to proxy request"}), 503
+
+# ============================================================================
+# API SERVICEREQUEST ROUTES (Frontend Compatibility)
+# ============================================================================
+
+@app.route('/api/servicerequest/create', methods=['POST', 'OPTIONS'])
+def api_servicerequest_create():
+    """ServiceRequest creation endpoint for frontend compatibility"""
+    logger.info(f"API ServiceRequest create: {request.method}")
+    
+    # Handle CORS preflight
+    if request.method == 'OPTIONS':
+        response = make_response()
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add('Access-Control-Allow-Headers', "*")
+        response.headers.add('Access-Control-Allow-Methods', "*")
+        return response
+    
+    # Ensure valid SatuSehat token
+    try:
+        health_response = requests.get(f"{SATUSEHAT_INTEGRATOR_URL}/oauth/health", timeout=5)
+        
+        if health_response.status_code == 200:
+            health_data = health_response.json()
+            if not health_data.get('valid', False):
+                logger.info("SatuSehat token invalid, refreshing")
+                refresh_response = requests.post(f"{SATUSEHAT_INTEGRATOR_URL}/oauth/refresh", timeout=10)
+                if refresh_response.status_code != 200:
+                    logger.error("Failed to refresh SatuSehat token")
+                    return jsonify({'error': 'token_refresh_failed'}), 503
+        else:
+            logger.info("SatuSehat health check failed, generating new token")
+            token_response = requests.post(f"{SATUSEHAT_INTEGRATOR_URL}/oauth/token", timeout=10)
+            if token_response.status_code != 200:
+                logger.error("Failed to generate SatuSehat token")
+                return jsonify({'error': 'token_generation_failed'}), 503
+                
+    except requests.RequestException as e:
+        logger.error(f"Error checking SatuSehat token: {e}")
+        return jsonify({'error': 'service_unavailable'}), 503
+    
+    # Handle request body
+    data = None
+    if request.content_type and 'application/json' in request.content_type:
+        try:
+            data = request.get_json()
+            logger.info(f"[gateway] API ServiceRequest payload received from frontend: {data}")
+        except Exception as e:
+            logger.error(f"[gateway] Failed to parse JSON body: {e}")
+            return jsonify({'error': 'invalid_json', 'message': 'Request body is not valid JSON'}), 400
+    
+    # Forward to satusehat-integrator servicerequest endpoint
+    return proxy_request(SATUSEHAT_INTEGRATOR_URL, 'servicerequest', 'POST', data=data)
+
+# ============================================================================
+# SATUSEHAT INTEGRATOR ROUTES
+# ============================================================================
+
+@app.route('/satusehat/token/generate', methods=['POST'])
+@require_auth(['system:admin', 'setting:write', '*'])
+def satusehat_generate_token():
+    """
+    Generate or retrieve SatuSehat token with rate-limit friendly behavior.
+
+    Prioritas:
+    1. Jika satusehat-integrator melaporkan token masih valid (via /oauth/health),
+       ambil token dari satusehat-integrator (/oauth/token) tanpa memukul server SatuSehat.
+    2. Jika tidak valid / gagal, generate token baru langsung ke SatuSehat
+       menggunakan konfigurasi dari settings.integration_registry.satusehat.
+
+    Catatan:
+    - Mengurangi risiko rate limit dengan memanfaatkan caching/token management di satusehat-integrator.
+    - Endpoint ini hanya boleh diakses oleh admin (setting:write atau *).
+    """
+    # 1) Cek ke satusehat-integrator apakah token masih valid
+    try:
+        health_resp = requests.get(
+            f"{SATUSEHAT_INTEGRATOR_URL}/oauth/health",
+            timeout=5
+        )
+        if health_resp.status_code == 200:
+            health_data = health_resp.json()
+            if health_data.get("valid"):
+                # Token masih valid menurut integrator -> minta token dari integrator
+                try:
+                    token_resp = requests.get(
+                        f"{SATUSEHAT_INTEGRATOR_URL}/oauth/token",
+                        timeout=5
+                    )
+                    ct = token_resp.headers.get("Content-Type", "")
+                    try:
+                        token_body = token_resp.json() if "json" in ct else {"raw": token_resp.text[:2048]}
+                    except ValueError:
+                        token_body = {"raw": token_resp.text[:2048]}
+
+                    if token_resp.status_code == 200:
+                        logger.info("[satusehat] Using existing valid token from satusehat-integrator")
+                        return jsonify({
+                            "status": "ok",
+                            "source": "cache",
+                            "integrator": True,
+                            "token": token_body
+                        }), 200
+                    else:
+                        logger.warning(
+                            f"[satusehat] integrator /oauth/token returned {token_resp.status_code}, "
+                            f"will fallback to direct generation"
+                        )
+                except requests.RequestException as e:
+                    logger.warning(f"[satusehat] Failed to get token from integrator: {e}, fallback to direct")
+        else:
+            logger.info(
+                f"[satusehat] integrator /oauth/health status={health_resp.status_code}, "
+                "will fallback to direct generation"
+            )
+    except requests.RequestException as e:
+        logger.warning(f"[satusehat] integrator /oauth/health error: {e}, fallback to direct")
+
+    # 2) Fallback: generate token baru langsung ke SatuSehat berdasarkan settings
+    cfg, err = get_satusehat_config_from_settings()
+    if err:
+        return jsonify({
+            "status": "error",
+            "message": err
+        }), 400
+
+    token_endpoint = cfg["tokenEndpoint"]
+    client_id = cfg["clientId"]
+    client_secret = cfg["clientSecret"]
+    scope = cfg.get("scope") or ""
+    timeout_ms = cfg.get("timeoutMs") or 10000
+
+    payload = {
+        "grant_type": "client_credentials",
+        "client_id": client_id,
+        "client_secret": client_secret,
+    }
+    if scope:
+        payload["scope"] = scope
+
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded"
+    }
+
+    try:
+        timeout = max(1, int(timeout_ms / 1000))
+    except Exception:
+        timeout = 10
+
+    try:
+        logger.info(
+            f"[satusehat] Requesting NEW token from {token_endpoint} "
+            f"(env={cfg.get('env', 'unknown')}) via client_credentials"
+        )
+        resp = requests.post(token_endpoint, data=payload, headers=headers, timeout=timeout)
+
+        content_type = resp.headers.get("Content-Type", "")
+        try:
+            body = resp.json() if "json" in content_type else {"raw": resp.text[:2048]}
+        except ValueError:
+            body = {"raw": resp.text[:2048]}
+
+        if resp.status_code != 200:
+            logger.error(f"[satusehat] Direct token generation failed: {resp.status_code} {body}")
+            return jsonify({
+                "status": "error",
+                "message": "Failed to generate SatuSehat token",
+                "status_code": resp.status_code,
+                "response": body
+            }), 502
+
+        logger.info("[satusehat] New token generated successfully via gateway (direct)")
+
+        # Sync token ke satusehat-integrator agar:
+        # - Disimpan ke satusehat_tokens
+        # - Di-upsert ke settings (satusehat_latest_token)
+        try:
+          sync_payload = {
+              "access_token": body.get("access_token"),
+              "token_type": body.get("token_type"),
+              "expires_in": body.get("expires_in"),
+              "scope": body.get("scope"),
+              "issued_at": body.get("issued_at"),
+              "organizationId": cfg.get("organizationId"),
+          }
+          # Hanya kirim kalau ada access_token
+          if sync_payload["access_token"]:
+              sync_resp = requests.post(
+                  f"{SATUSEHAT_INTEGRATOR_URL}/oauth/token/store",
+                  json=sync_payload,
+                  timeout=5
+              )
+              if sync_resp.status_code != 200:
+                  logger.warning(
+                      f"[satusehat] Failed to sync token to integrator: "
+                      f"status={sync_resp.status_code} body={sync_resp.text[:256]}"
+                  )
+          else:
+              logger.warning("[satusehat] Missing access_token in direct response; skip sync to integrator")
+        except requests.RequestException as e:
+          logger.warning(f"[satusehat] Error syncing token to satusehat-integrator: {e}")
+
+        return jsonify({
+            "status": "ok",
+            "source": "direct",
+            "env": cfg.get("env"),
+            "organizationId": cfg.get("organizationId"),
+            "tokenEndpoint": token_endpoint,
+            "token": body
+        }), 200
+
+    except requests.RequestException as e:
+        logger.error(f"[satusehat] Error calling SatuSehat token endpoint: {e}")
+        return jsonify({
+            "status": "error",
+            "message": "Error calling SatuSehat token endpoint",
+            "detail": str(e)
+        }), 503
+
+
+@app.route('/satusehat/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
+def satusehat_proxy(path):
+    """Enhanced SatuSehat proxy with automatic token management"""
+    logger.info(f"SatuSehat proxy: {request.method} /{path}")
+    
+    # Handle CORS preflight
+    if request.method == 'OPTIONS':
+        response = make_response()
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add('Access-Control-Allow-Headers', "*")
+        response.headers.add('Access-Control-Allow-Methods', "*")
+        return response
+    
+    # Token endpoints - no auth required
+    if path in ['oauth/token', 'oauth/health', 'oauth/refresh']:
+        return proxy_request(SATUSEHAT_INTEGRATOR_URL, path, request.method)
+    
+    # FHIR endpoints - ensure valid token
+    if path.startswith('location') or path in ['patient', 'practitioner', 'encounter', 'servicerequest']:
+        try:
+            health_response = requests.get(f"{SATUSEHAT_INTEGRATOR_URL}/oauth/health", timeout=5)
+            
+            if health_response.status_code == 200:
+                health_data = health_response.json()
+                if not health_data.get('valid', False):
+                    logger.info("SatuSehat token invalid, refreshing")
+                    refresh_response = requests.post(f"{SATUSEHAT_INTEGRATOR_URL}/oauth/refresh", timeout=10)
+                    if refresh_response.status_code != 200:
+                        logger.error("Failed to refresh SatuSehat token")
+                        return jsonify({'error': 'token_refresh_failed'}), 503
+            else:
+                logger.info("SatuSehat health check failed, generating new token")
+                token_response = requests.post(f"{SATUSEHAT_INTEGRATOR_URL}/oauth/token", timeout=10)
+                if token_response.status_code != 200:
+                    logger.error("Failed to generate SatuSehat token")
+                    return jsonify({'error': 'token_generation_failed'}), 503
+                    
+        except requests.RequestException as e:
+            logger.error(f"Error checking SatuSehat token: {e}")
+            return jsonify({'error': 'service_unavailable'}), 503
+    
+    # Other endpoints require user authentication
+    elif not path.startswith('health') and not path.startswith('ready'):
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return jsonify({'error': 'unauthorized', 'message': 'Missing authorization'}), 401
+        
+        token = auth_header.split(' ')[1]
+        user = validate_token(token)
+        if not user:
+            return jsonify({'error': 'unauthorized', 'message': 'Invalid token'}), 401
+    
+    return proxy_request(SATUSEHAT_INTEGRATOR_URL, path, request.method)
+
+# ============================================================================
+# ORTHANC API ROUTES (via Orthanc Proxy)
+# ============================================================================
+
+@app.route('/orthanc/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE'])
+@require_auth(['orthanc:read', '*'])
+def orthanc_api_proxy(path):
+    """Proxy Orthanc API requests through orthanc-proxy"""
+    fwd_headers = {k: v for k, v in request.headers if k.lower() != 'host'}
+    return proxy_request(
+        ORTHANC_SERVICE_URL,
+        path,
+        request.method,
+        headers=fwd_headers,
+        raw_data=request.get_data(),
+        params=request.args
+    )
+
+# ============================================================================
+# ORTHANC WEB UI ACCESS (Direct to Orthanc HTTP)
+# ============================================================================
+
+@app.route('/orthanc-ui', methods=['GET'])
+@app.route('/orthanc-ui/', methods=['GET'])
+def orthanc_web_ui_root():
+    """Redirect to Orthanc Web UI Explorer"""
+    username = 'anonymous'
+    if not ALLOW_ORTHANC_UI_PUBLIC:
+        auth = request.authorization
+        if not auth:
+            return jsonify({"status": "error", "message": "Missing authorization"}), 401, \
+                   {'WWW-Authenticate': 'Basic realm="Orthanc Gateway"'}
+        if auth.username != ADMIN_USERNAME or auth.password != ADMIN_PASSWORD:
+            return jsonify({"status": "error", "message": "Invalid credentials"}), 401
+        username = auth.username
+
+    logger.info(f"Orthanc Web UI access by: {username}")
+    
+    try:
+        from requests.auth import HTTPBasicAuth
+        orthanc_user = os.getenv('ORTHANC_USERNAME', 'orthanc')
+        orthanc_pass = os.getenv('ORTHANC_PASSWORD', 'orthanc')
+        
+        response = requests.get(
+            f"{ORTHANC_WEB_URL}/app/explorer.html",
+            auth=HTTPBasicAuth(orthanc_user, orthanc_pass),
+            timeout=30
+        )
+        
+        return Response(response.content, status=response.status_code, headers=dict(response.headers))
+    except Exception as e:
+        logger.error(f"Orthanc Web UI error: {str(e)}")
+        return jsonify({"status": "error", "message": "Failed to access Orthanc Web UI"}), 503
+
+@app.route('/orthanc-ui/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE'])
+def orthanc_web_ui_proxy(path):
+    """Proxy all Orthanc Web UI requests"""
+    try:
+        username = 'anonymous'
+        if not ALLOW_ORTHANC_UI_PUBLIC:
+            auth = request.authorization
+            if not auth:
+                return jsonify({"status": "error", "message": "Missing authorization"}), 401, \
+                       {'WWW-Authenticate': 'Basic realm="Orthanc Gateway"'}
+            if auth.username != ADMIN_USERNAME or auth.password != ADMIN_PASSWORD:
+                return jsonify({"status": "error", "message": "Invalid credentials"}), 401
+            username = auth.username
+        else:
+            if request.method in ['POST', 'PUT', 'DELETE']:
+                return jsonify({"status": "error", "message": "Write permission required"}), 403
+        
+        from requests.auth import HTTPBasicAuth
+        orthanc_user = os.getenv('ORTHANC_USERNAME', 'orthanc')
+        orthanc_pass = os.getenv('ORTHANC_PASSWORD', 'orthanc')
+        
+        url = f"{ORTHANC_WEB_URL}/{path}"
+        
+        response = requests.request(
+            method=request.method,
+            url=url,
+            headers={k: v for k, v in request.headers if k.lower() not in ['host', 'authorization']},
+            data=request.get_data(),
+            params=request.args,
+            auth=HTTPBasicAuth(orthanc_user, orthanc_pass),
+            timeout=30,
+            allow_redirects=False
+        )
+        
+        logger.info(f"Orthanc Web UI: {username} -> {request.method} /{path}")
+        
+        excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
+        headers = {k: v for k, v in response.headers.items() if k.lower() not in excluded_headers}
+        
+        return Response(response.content, status=response.status_code, headers=headers)
+        
+    except Exception as e:
+        logger.error(f"Orthanc Web UI proxy error: {str(e)}")
+        return jsonify({"status": "error", "message": "Failed to proxy Orthanc Web UI"}), 503
+
+# ============================================================================
+# ORTHANC UI STATIC ASSETS (absolute /ui and /app paths)
+# ============================================================================
+
+@app.route('/ui', methods=['GET'])
+@app.route('/ui/<path:path>', methods=['GET'])
+def orthanc_ui_static_proxy(path=None):
+    """Proxy Orthanc Explorer 2 static assets"""
+    from requests.auth import HTTPBasicAuth
+    if not ALLOW_ORTHANC_UI_PUBLIC:
+        auth = request.authorization
+        if not auth or auth.username != ADMIN_USERNAME or auth.password != ADMIN_PASSWORD:
+            return jsonify({"status": "error"}), 401, {'WWW-Authenticate': 'Basic realm="Orthanc Gateway"'}
+    
+    orthanc_user = os.getenv('ORTHANC_USERNAME', 'orthanc')
+    orthanc_pass = os.getenv('ORTHANC_PASSWORD', 'orthanc')
+    url = f"{ORTHANC_WEB_URL}/ui" + (f"/{path}" if path else "")
+    
+    try:
+        resp = requests.get(url, auth=HTTPBasicAuth(orthanc_user, orthanc_pass), timeout=30, allow_redirects=False)
+        excluded = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
+        headers = {k: v for k, v in resp.headers.items() if k.lower() not in excluded}
+        return Response(resp.content, status=resp.status_code, headers=headers)
+    except Exception as e:
+        logger.error(f"Orthanc /ui proxy error: {str(e)}")
+        return jsonify({"status": "error", "message": "Failed to fetch /ui asset"}), 503
+
+@app.route('/app', methods=['GET'])
+@app.route('/app/<path:path>', methods=['GET'])
+def orthanc_app_static_proxy(path=None):
+    """Proxy Orthanc Explorer v1 static assets"""
+    from requests.auth import HTTPBasicAuth
+    if not ALLOW_ORTHANC_UI_PUBLIC:
+        auth = request.authorization
+        if not auth or auth.username != ADMIN_USERNAME or auth.password != ADMIN_PASSWORD:
+            return jsonify({"status": "error"}), 401, {'WWW-Authenticate': 'Basic realm="Orthanc Gateway"'}
+    
+    orthanc_user = os.getenv('ORTHANC_USERNAME', 'orthanc')
+    orthanc_pass = os.getenv('ORTHANC_PASSWORD', 'orthanc')
+    url = f"{ORTHANC_WEB_URL}/app" + (f"/{path}" if path else "")
+    
+    try:
+        resp = requests.get(url, auth=HTTPBasicAuth(orthanc_user, orthanc_pass), timeout=30, allow_redirects=False)
+        excluded = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
+        headers = {k: v for k, v in resp.headers.items() if k.lower() not in excluded}
+        return Response(resp.content, status=resp.status_code, headers=headers)
+    except Exception as e:
+        logger.error(f"Orthanc /app proxy error: {str(e)}")
+        return jsonify({"status": "error", "message": "Failed to fetch /app asset"}), 503
+
+# ============================================================================
+# PATIENT MASTER DATA ROUTES
+# ============================================================================
+
+@app.route('/patients/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE'])
+@require_auth()
+def patients_proxy(path):
+    """Proxy patient master data requests with method-specific permissions"""
+    user = request.current_user
+    user_perms = user.get('permissions', []) or []
+
+    method_required = {
+        'GET': ['patient:read', '*'],
+        'POST': ['patient:create', '*'],
+        'PUT': ['patient:update', '*'],
+        'DELETE': ['patient:delete', '*']
+    }
+    required = method_required.get(request.method, ['patient:read', '*'])
+
+    # Gunakan check_permission agar wildcard seperti 'patient:*' ikut dikenali
+    if not check_permission(user_perms, required):
+        logger.warning(
+            f"Permission denied for {user.get('username')} on {request.method} /patients/{path}. "
+            f"Required: {required}, Has: {user_perms}"
+        )
+        return jsonify({
+            "status": "error",
+            "message": "Permission denied",
+            "required": required,
+            "user_permissions": user_perms
+        }), 403
+
+    try:
+        response = proxy_request(
+            MASTER_DATA_SERVICE_URL,
+            f'patients/{path}',
+            request.method,
+            data=request.get_json(silent=True),
+            params=request.args
+        )
+        return response
+    except Exception as e:
+        logger.error(f"Patient proxy error: {str(e)}")
+        return jsonify({"status": "error", "message": "Failed to proxy request"}), 503
+
+@app.route('/patients/search', methods=['GET'])
+@require_auth(['patient:search', '*'])
+def patients_search():
+    """Search patients - requires patient:search permission"""
+    try:
+        response = proxy_request(MASTER_DATA_SERVICE_URL, 'patients/search', 'GET', params=request.args)
+        return response
+    except Exception as e:
+        logger.error(f"Patient search error: {str(e)}")
+        return jsonify({"status": "error", "message": "Failed to search patients"}), 503
+
+# ============================================================================
+# DOCTOR/PRACTITIONER MASTER DATA ROUTES
+# ============================================================================
+
+@app.route('/doctors/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE'])
+@require_auth()
+def doctors_proxy(path):
+    """Proxy doctor master data requests with method-specific permissions"""
+    user = request.current_user
+    user_perms = user.get('permissions', []) or []
+
+    method_required = {
+        'GET': ['doctor:read', 'practitioner:read', '*'],
+        'POST': ['doctor:create', 'practitioner:create', '*'],
+        'PUT': ['doctor:update', 'practitioner:update', '*'],
+        'DELETE': ['doctor:delete', 'practitioner:delete', '*']
+    }
+    required = method_required.get(request.method, ['doctor:read', 'practitioner:read', '*'])
+
+    # Gunakan check_permission agar wildcard seperti 'doctor:*' / 'practitioner:*' ikut dikenali
+    if not check_permission(user_perms, required):
+        logger.warning(
+            f"Permission denied for {user.get('username')} on {request.method} /doctors/{path}. "
+            f"Required: {required}, Has: {user_perms}"
+        )
+        return jsonify({
+            "status": "error",
+            "message": "Permission denied",
+            "required": required
+        }), 403
+
+    try:
+        response = proxy_request(
+            MASTER_DATA_SERVICE_URL,
+            f'doctors/{path}',
+            request.method,
+            data=request.get_json(silent=True),
+            params=request.args
+        )
+        return response
+    except Exception as e:
+        logger.error(f"Doctor proxy error: {str(e)}")
+        return jsonify({"status": "error", "message": "Failed to proxy request"}), 503
+
+@app.route('/doctors/search', methods=['GET'])
+@require_auth(['doctor:search', 'practitioner:search', '*'])
+def doctors_search():
+    """Search doctors - requires doctor:search or practitioner:search permission"""
+    try:
+        response = proxy_request(MASTER_DATA_SERVICE_URL, 'doctors/search', 'GET', params=request.args)
+        return response
+    except Exception as e:
+        logger.error(f"Doctor search error: {str(e)}")
+        return jsonify({"status": "error", "message": "Failed to search doctors"}), 503
+
+@app.route('/doctors', methods=['GET'])
+@require_auth(['doctor:read', 'practitioner:read', 'doctor:search', 'practitioner:search', '*'])
+def doctors_list():
+    """
+    List doctors via Master Data Service.
+
+    Uses /doctors endpoint in master-data-service (which internally delegates to search_doctors),
+    so supports filters (ihs_number, national_id, name, license, specialty, active).
+    """
+    try:
+        response = proxy_request(MASTER_DATA_SERVICE_URL, 'doctors', 'GET', params=request.args)
+        return response
+    except Exception as e:
+        logger.error(f"Doctor list error: {str(e)}")
+        return jsonify({"status": "error", "message": "Failed to list doctors"}), 503
+
+# Specific route for creating a doctor (to avoid conflict with search route)
+@app.route('/doctors', methods=['POST'])
+@require_auth(['doctor:create', 'practitioner:create', '*'])
+def doctors_create():
+    """Create new doctor - requires doctor:create or practitioner:create permission"""
+    try:
+        response = proxy_request(MASTER_DATA_SERVICE_URL, 'doctors', 'POST',
+                                data=request.get_json(silent=True))
+        return response
+    except Exception as e:
+        logger.error(f"Doctor create error: {str(e)}")
+        return jsonify({"status": "error", "message": "Failed to create doctor"}), 503
+
+# ============================================================================
+# SETTINGS ROUTES
+# ============================================================================
+
+@app.route('/settings', defaults={'path': ''}, methods=['GET', 'POST'])
+@app.route('/settings/<path:path>', methods=['GET', 'PUT', 'DELETE'])
+@require_auth()
+def settings_proxy(path):
+    """Proxy settings requests with method-specific permissions"""
+    user = request.current_user
+    user_perms = user.get('permissions', [])
+
+    method_required = {
+        'GET': ['setting:read', '*'],
+        'POST': ['setting:write', '*'],
+        'PUT': ['setting:write', '*'],
+        'DELETE': ['setting:write', '*']
+    }
+    required = method_required.get(request.method, ['setting:read', '*'])
+
+    if not check_permission(user_perms, required):
+            logger.warning(f"Permission denied for {user.get('username')} on {request.method} /settings/{path}")
+            return jsonify({
+                "status": "error",
+                "message": "Permission denied",
+                "required": required
+            }), 403
+    
+    full_path = f'settings/{path}' if path else 'settings'
+    try:
+        response = proxy_request(MASTER_DATA_SERVICE_URL, full_path, request.method,
+                                data=request.get_json(silent=True), params=request.args)
+        return response
+    except Exception as e:
+        logger.error(f"Settings proxy error: {str(e)}")
+        return jsonify({"status": "error", "message": "Failed to proxy request to settings service"}), 503
+
+
+# ============================================================================
+# DICOM ROUTER ROUTES
+# ============================================================================
+
+@app.route('/dicom-router/health', methods=['GET'])
+def dicom_router_health():
+    """Health check endpoint for DICOM Router service - public access"""
+    try:
+        response = proxy_request(DICOM_ROUTER_URL, 'health', 'GET')
+        return response
+    except Exception as e:
+        logger.error(f"DICOM Router health check error: {str(e)}")
+        return jsonify({"status": "error", "message": "Failed to check DICOM Router health"}), 503
+
+@app.route('/dicom-router', methods=['GET'])
+@require_auth(['dicom:router', '*'])
+def dicom_router_root():
+    """Root endpoint for DICOM Router service"""
+    user = request.current_user
+    logger.info(f"DICOM Router root request by user: {user.get('username', 'unknown')}")
+    
+    try:
+        response = proxy_request(DICOM_ROUTER_URL, '', 'GET')
+        return response
+    except Exception as e:
+        logger.error(f"DICOM Router root error: {str(e)}")
+        return jsonify({"status": "error", "message": "Failed to access DICOM Router"}), 503
+
+@app.route('/dicom-router/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
+@require_auth(['dicom:router', '*'])
+def dicom_router_proxy(path):
+    """Proxy DICOM Router requests with authentication and proper error handling"""
+    user = request.current_user
+    logger.info(f"DICOM Router request: {request.method} /{path} by user: {user.get('username', 'unknown')}")
+    
+    try:
+        response = proxy_request(DICOM_ROUTER_URL, path, request.method,
+                                data=request.get_json(silent=True), 
+                                params=request.args,
+                                headers=dict(request.headers))
+        return response
+    except Exception as e:
+        logger.error(f"DICOM Router proxy error: {str(e)}")
+        return jsonify({"status": "error", "message": "Failed to proxy request to DICOM Router"}), 503
+
+# ============================================================================
+# STORAGE / CAPACITY STATS
+# ============================================================================
+
+@app.route('/storage/stats', methods=['GET'])
+@require_auth(['storage:stats', '*'])
+def storage_stats():
+    """
+    Aggregated storage statistics endpoint.
+
+    Saat ini fokus:
+    - Mengambil statistik dari Orthanc (/statistics).
+    - Struktur response dibuat extensible untuk menambah sumber lain:
+      postgres, dicom-router, order-files, dsb.
+
+    Response contoh:
+    {
+      "status": "ok",
+      "sources": {
+        "orthanc": {
+          "ok": true,
+          "url": "http://orthanc:8042/statistics",
+          "data": { ...isi dari Orthanc... }
+        }
+      }
+    }
+    """
+    from requests.auth import HTTPBasicAuth
+
+    result = {
+        "status": "ok",
+        "sources": {}
+    }
+
+    # ---------------- Orthanc statistics ----------------
+    orthanc_user = os.getenv('ORTHANC_USERNAME', 'orthanc')
+    orthanc_pass = os.getenv('ORTHANC_PASSWORD', 'orthanc')
+    orthanc_stats_url = f"{ORTHANC_WEB_URL}/statistics"
+
+    try:
+        resp = requests.get(
+            orthanc_stats_url,
+            auth=HTTPBasicAuth(orthanc_user, orthanc_pass),
+            timeout=10
+        )
+        if resp.status_code == 200:
+            # Orthanc statistics biasanya sudah JSON
+            try:
+                data = resp.json()
+            except ValueError:
+                data = {"raw": resp.text[:2048]}
+            result["sources"]["orthanc"] = {
+                "ok": True,
+                "url": orthanc_stats_url,
+                "data": data
+            }
+        else:
+            result["sources"]["orthanc"] = {
+                "ok": False,
+                "url": orthanc_stats_url,
+                "status_code": resp.status_code,
+                "error": resp.text[:512]
+            }
+    except Exception as e:
+        logger.error(f"[storage-stats] Failed to get Orthanc statistics: {e}")
+        result["sources"]["orthanc"] = {
+            "ok": False,
+            "url": orthanc_stats_url,
+            "error": str(e)
+        }
+
+    # Placeholder untuk future extensions (tidak error meski belum diisi)
+    # result["sources"]["postgres"] = { ... }
+    # result["sources"]["order_files"] = { ... }
+    # result["sources"]["dicom_router"] = { ... }
+
+    return jsonify(result), 200
+
+
+# ============================================================================
+# ORTHANC API DIRECT (used by UI: absolute root endpoints)
+# ============================================================================
+
+def _is_safe_public_ui_call(prefix, subpath):
+    """Check if operation is safe for public UI mode"""
+    if request.method in ['GET', 'HEAD', 'OPTIONS']:
+        return True
+    if request.method == 'POST':
+        full = f"{prefix}/{subpath}" if subpath else prefix
+        if full.startswith('tools/find') or full.startswith('tools/lookup'):
+            return True
+    return False
+
+def _proxy_orthanc_direct(prefix, subpath=None):
+    """Proxy direct Orthanc API calls (used by UI)"""
+    from requests.auth import HTTPBasicAuth
+    
+    if not ALLOW_ORTHANC_UI_PUBLIC:
+        auth = request.authorization
+        if not auth or auth.username != ADMIN_USERNAME or auth.password != ADMIN_PASSWORD:
+            return jsonify({"status": "error"}), 401, {'WWW-Authenticate': 'Basic realm="Orthanc Gateway"'}
+    else:
+        if not _is_safe_public_ui_call(prefix, subpath):
+            return jsonify({"status": "error", "message": "Operation not allowed in public mode"}), 403
+    
+    orthanc_user = os.getenv('ORTHANC_USERNAME', 'orthanc')
+    orthanc_pass = os.getenv('ORTHANC_PASSWORD', 'orthanc')
+    url = f"{ORTHANC_WEB_URL}/{prefix}" + (f"/{subpath}" if subpath else "")
+    
+    try:
+        resp = requests.request(
+            method=request.method,
+            url=url,
+            headers={k: v for k, v in request.headers if k.lower() not in ['host', 'authorization']},
+            data=request.get_data(),
+            params=request.args,
+            auth=HTTPBasicAuth(orthanc_user, orthanc_pass),
+            timeout=30,
+            allow_redirects=False
+        )
+        excluded = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
+        headers = {k: v for k, v in resp.headers.items() if k.lower() not in excluded}
+        return Response(resp.content, status=resp.status_code, headers=headers)
+    except Exception as e:
+        logger.error(f"Orthanc API direct proxy error [{prefix}]: {str(e)}")
+        return jsonify({"status": "error", "message": "Failed to proxy Orthanc API"}), 503
+
+# Minimal set of endpoints used by UI
+@app.route('/system', methods=['GET'])
+def orthanc_system():
+    return _proxy_orthanc_direct('system')
+
+@app.route('/statistics', methods=['GET'])
+def orthanc_statistics():
+    return _proxy_orthanc_direct('statistics')
+
+@app.route('/tools', methods=['GET', 'POST'])
+@app.route('/tools/<path:subpath>', methods=['GET', 'POST'])
+def orthanc_tools(subpath=None):
+    return _proxy_orthanc_direct('tools', subpath)
+
+@app.route('/instances', methods=['GET'])
+@app.route('/instances/<path:subpath>', methods=['GET'])
+def orthanc_instances(subpath=None):
+    return _proxy_orthanc_direct('instances', subpath)
+
+@app.route('/studies', methods=['GET'])
+@app.route('/studies/<path:subpath>', methods=['GET'])
+def orthanc_studies(subpath=None):
+    return _proxy_orthanc_direct('studies', subpath)
+
+@app.route('/series', methods=['GET'])
+@app.route('/series/<path:subpath>', methods=['GET'])
+def orthanc_series(subpath=None):
+    return _proxy_orthanc_direct('series', subpath)
+
+@app.route('/patients', methods=['GET'])
+@require_auth(['patient:read', 'patient:search', '*'])
+def patients_list():
+    """
+    List patients via Master Data Service.
+
+    Uses the new /patients endpoint (supports filters + pagination).
+    For backward compatibility, clients can still call /patients/search directly.
+    """
+    return proxy_request(MASTER_DATA_SERVICE_URL, 'patients', 'GET', params=request.args)
+
+
+@app.route('/patients', methods=['POST'])
+@require_auth(['patient:create', '*'])
+def patients_create():
+    """
+    Create a new patient via Master Data Service.
+
+    Proxies POST /patients to master-data-service.
+    """
+    try:
+        payload = request.get_json(silent=True)
+        return proxy_request(
+            MASTER_DATA_SERVICE_URL,
+            'patients',
+            'POST',
+            data=payload
+        )
+    except Exception as e:
+        logger.error(f"Patient create error via gateway: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "message": "Failed to create patient via gateway"
+        }), 503
+
+@app.route('/changes', methods=['GET'])
+def orthanc_changes():
+    return _proxy_orthanc_direct('changes')
+
+@app.route('/peers', methods=['GET'])
+@app.route('/peers/<path:subpath>', methods=['GET'])
+def orthanc_peers(subpath=None):
+    return _proxy_orthanc_direct('peers', subpath)
+
+@app.route('/modalities', methods=['GET'])
+@app.route('/modalities/<path:subpath>', methods=['GET'])
+def orthanc_modalities(subpath=None):
+    return _proxy_orthanc_direct('modalities', subpath)
+
+@app.route('/plugins', methods=['GET'])
+@app.route('/plugins/<path:subpath>', methods=['GET'])
+def orthanc_plugins(subpath=None):
+    return _proxy_orthanc_direct('plugins', subpath)
+
+@app.route('/jobs', methods=['GET'])
+@app.route('/jobs/<path:subpath>', methods=['GET'])
+def orthanc_jobs(subpath=None):
+    return _proxy_orthanc_direct('jobs', subpath)
+
+# ============================================================================
+# APPLICATION STARTUP
+# ============================================================================
+
+if __name__ == '__main__':
+    logger.info("=" * 80)
+    logger.info("API Gateway v2.2.0 - Production Ready with Enhanced RBAC")
+    logger.info("=" * 80)
+    logger.info("Service URLs:")
+    logger.info(f"  Auth Service: {AUTH_SERVICE_URL}")
+    logger.info(f"  MWL Service: {MWL_SERVICE_URL}")
+    logger.info(f"  MWL UI Service: {MWL_UI_SERVICE_URL}")
+    logger.info(f"  Orthanc Service: {ORTHANC_SERVICE_URL}")
+    logger.info(f"  Order Service: {ORDER_SERVICE_URL}")
+    logger.info(f"  Accession API: {ACCESSION_API_URL}")
+    logger.info(f"  DICOM Router: {DICOM_ROUTER_URL}")
+    logger.info(f"  SIMRS Bridge: {SIMRS_BRIDGE_URL}")
+    logger.info(f"  SATUSEHAT Integrator: {SATUSEHAT_INTEGRATOR_URL}")
+    logger.info(f"  Master Data Service: {MASTER_DATA_SERVICE_URL}")
+    logger.info(f"  Orthanc Web UI: {ORTHANC_WEB_URL}")
+    if ENABLE_MODALITY_SIMULATOR:
+        logger.info(f"  Modality Simulator: {MODALITY_SIMULATOR_URL}")
+    logger.info("=" * 80)
+    logger.info("Features:")
+    logger.info("  ✓ JWT Authentication with RBAC")
+    logger.info("  ✓ Role-Based Access Control")
+    logger.info("  ✓ Permission Management (wildcard support)")
+    logger.info("  ✓ User Management API")
+    logger.info("  ✓ Rate Limiting")
+    logger.info("  ✓ CORS Support")
+    logger.info("=" * 80)
+    logger.info("Access Points:")
+    logger.info("  ✓ Gateway: http://localhost:8888")
+    logger.info("  ✓ Orthanc Web UI: http://localhost:8888/orthanc-ui/")
+    logger.info("  ✓ MWL UI: http://localhost:8888/mwl-ui/")
+    logger.info("=" * 80)
+    logger.info("Security: All services accessible ONLY through this gateway")
+    logger.info("=" * 80)
+
+    app.run(host='0.0.0.0', port=8888, debug=False)

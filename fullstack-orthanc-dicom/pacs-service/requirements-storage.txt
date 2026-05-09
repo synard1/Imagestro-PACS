@@ -1,0 +1,15 @@
+# DICOM Storage Requirements
+# Install with: pip install -r requirements-storage.txt
+
+# DICOM Processing
+pydicom>=2.4.0
+pillow>=10.0.0
+numpy>=1.24.0
+
+# Compression (for JPEG 2000, etc.)
+pylibjpeg>=2.0.0
+pylibjpeg-openjpeg>=1.2.0
+pylibjpeg-libjpeg>=2.0.0
+
+# S3-Compatible Object Storage
+boto3>=1.34.0  # AWS S3, MinIO,  Contabo, Wasabi, etc.

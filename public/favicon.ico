@@ -1,0 +1,10 @@
+# Favicon
+# 
+# This is a placeholder file. Replace with actual ICO file generated from base-icon.svg
+# Required size: 32x32 pixels (can contain multiple sizes)
+# Format: ICO format for maximum browser compatibility
+# Purpose: Browser tab icon
+#
+# To generate: 
+# 1. node generate-icons.js (creates favicon.png)
+# 2. Convert PNG to ICO using online converter or ImageMagick

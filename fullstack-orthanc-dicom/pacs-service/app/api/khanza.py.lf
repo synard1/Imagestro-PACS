@@ -1,0 +1,1435 @@
+﻿"""
+Khanza Integration API Endpoints
+RESTful API for SIMRS Khanza integration with PACS
+"""
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sqlalchemy.orm import Session
+from sqlalchemy import and_, or_, func
+from typing import Optional, List
+from datetime import date, datetime
+from pydantic import BaseModel, Field
+import uuid
+import os
+import httpx
+
+from app.database import get_db
+from app.models.khanza import (
+    KhanzaConfig,
+    KhanzaProcedureMapping,
+    KhanzaDoctorMapping,
+    KhanzaImportHistory,
+    KhanzaUnmappedProcedure  # Keep for legacy unmapped procedures tracking
+)
+from app.utils.khanza_helper import get_khanza_bridge_config
+from app.models.unified_integration import (
+    ExternalSystem,
+    UnifiedProcedureMapping,
+    UnifiedDoctorMapping,
+    UnifiedImportHistory
+)
+from app.models.worklist import WorklistItem
+from app.utils.logger import get_logger
+from app.services.accession_helper import get_next_accession
+
+logger = get_logger(__name__)
+router = APIRouter(prefix="/api/khanza", tags=["khanza"])
+
+# Constants
+KHANZA_SYSTEM_ID = '78a172da-4c4b-449e-a0a8-fd1e1f854e8f'
+
+# ============================================================================
+# Pydantic Schemas
+# ============================================================================
+
+# Config Schemas
+class KhanzaConfigCreate(BaseModel):
+    """Create Khanza configuration"""
+    base_url: str = Field(..., min_length=1, description="Khanza API base URL")
+    api_key: str = Field(..., min_length=1, description="API key for authentication")
+    timeout_ms: int = Field(default=30000, gt=0, description="Request timeout in milliseconds")
+
+class KhanzaConfigUpdate(BaseModel):
+    """Update Khanza configuration"""
+    base_url: Optional[str] = Field(None, min_length=1)
+    api_key: Optional[str] = Field(None, min_length=1)
+    timeout_ms: Optional[int] = Field(None, gt=0)
+    is_active: Optional[bool] = None
+
+class KhanzaConfigResponse(BaseModel):
+    """Khanza configuration response"""
+    id: str
+    base_url: str
+    api_key: str
+    timeout_ms: int
+    is_active: bool
+    created_at: Optional[str]
+    updated_at: Optional[str]
+
+    class Config:
+        from_attributes = True
+
+
+# Procedure Mapping Schemas
+class ProcedureMappingCreate(BaseModel):
+    """Create procedure mapping"""
+    khanza_code: str = Field(..., min_length=1, description="Khanza procedure code")
+    khanza_name: str = Field(..., min_length=1, description="Khanza procedure name")
+    pacs_code: str = Field(..., min_length=1, description="PACS procedure code")
+    pacs_name: str = Field(..., min_length=1, description="PACS procedure name")
+    modality: Optional[str] = Field(None, description="Modality type (CT, MR, CR, etc.)")
+    description: Optional[str] = None
+
+class ProcedureMappingUpdate(BaseModel):
+    """Update procedure mapping"""
+    khanza_name: Optional[str] = Field(None, min_length=1)
+    pacs_code: Optional[str] = Field(None, min_length=1)
+    pacs_name: Optional[str] = Field(None, min_length=1)
+    modality: Optional[str] = None
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+
+class ProcedureMappingResponse(BaseModel):
+    """Procedure mapping response"""
+    id: str
+    khanza_code: str
+    khanza_name: str
+    pacs_code: str
+    pacs_name: str
+    modality: Optional[str]
+    description: Optional[str]
+    is_active: bool
+    created_at: Optional[str]
+    updated_at: Optional[str]
+    created_by: Optional[str]
+    updated_by: Optional[str]
+
+    class Config:
+        from_attributes = True
+
+
+# Doctor Mapping Schemas
+class DoctorMappingCreate(BaseModel):
+    """Create doctor mapping"""
+    khanza_code: str = Field(..., min_length=1, description="Khanza doctor code")
+    khanza_name: str = Field(..., min_length=1, description="Khanza doctor name")
+    pacs_doctor_id: Optional[str] = Field(None, description="PACS doctor ID")
+
+class DoctorMappingUpdate(BaseModel):
+    """Update doctor mapping"""
+    khanza_name: Optional[str] = Field(None, min_length=1)
+    pacs_doctor_id: Optional[str] = None
+
+class DoctorMappingResponse(BaseModel):
+    """Doctor mapping response"""
+    id: str
+    khanza_code: str
+    khanza_name: str
+    pacs_doctor_id: Optional[str]
+    auto_created: bool
+    created_at: Optional[str]
+    updated_at: Optional[str]
+
+    class Config:
+        from_attributes = True
+
+
+# Import Schemas
+class ImportOrderRequest(BaseModel):
+    """Import order request"""
+    noorder: str = Field(..., min_length=1, description="Khanza order number")
+    no_rawat: Optional[str] = Field(None, description="Visit/registration number")
+    no_rkm_medis: str = Field(..., min_length=1, description="Patient MRN")
+    patient_national_id: Optional[str] = Field(None, description="Patient NIK/KTP")
+    patient_name: str = Field(..., min_length=1, description="Patient name")
+    patient_sex: Optional[str] = Field(None, description="Patient sex (L/P)")
+    patient_birthdate: Optional[str] = Field(None, description="Patient birthdate")
+    patient_address: Optional[str] = Field(None, description="Patient address")
+    patient_phone: Optional[str] = Field(None, description="Patient phone")
+    kd_jenis_prw: str = Field(..., min_length=1, description="Khanza procedure code")
+    nm_perawatan: str = Field(..., min_length=1, description="Procedure name")
+    kd_dokter: Optional[str] = Field(None, description="Referring doctor code")
+    nm_dokter: Optional[str] = Field(None, description="Referring doctor name")
+    tgl_permintaan: str = Field(..., description="Request date (YYYY-MM-DD)")
+    jam_permintaan: Optional[str] = Field(None, description="Request time (HH:MM:SS)")
+    diagnosa_klinis: Optional[str] = Field(None, description="Clinical diagnosis")
+    informasi_tambahan: Optional[str] = Field(None, description="Additional info")
+    update_patient_if_different: bool = Field(default=False, description="Update patient if data differs")
+    raw_data: Optional[dict] = Field(None, description="Original raw data from Khanza")
+
+class ImportOrderResponse(BaseModel):
+    """Import order response"""
+    success: bool
+    noorder: str
+    worklist_item_id: Optional[str]
+    patient_created: bool
+    patient_updated: bool
+    errors: Optional[List[str]]
+    warnings: Optional[List[str]]
+
+class ImportHistoryResponse(BaseModel):
+    """Import history response"""
+    id: str
+    noorder: str
+    no_rawat: Optional[str]
+    no_rkm_medis: Optional[str]
+    patient_name: Optional[str]
+    procedure_name: Optional[str]
+    import_status: str
+    worklist_item_id: Optional[str]
+    patient_created: bool
+    patient_updated: bool
+    error_message: Optional[str]
+    warnings: Optional[List[str]]
+    imported_by: Optional[str]
+    imported_at: Optional[str]
+
+    class Config:
+        from_attributes = True
+
+
+class ImportHistoryCreate(BaseModel):
+    """Create import history request"""
+    noorder: str = Field(..., min_length=1)
+    no_rawat: Optional[str] = None
+    no_rkm_medis: Optional[str] = None
+    patient_name: Optional[str] = None
+    procedure_name: Optional[str] = None
+    import_status: str = Field(..., pattern="^(success|failed|partial)$")
+    worklist_item_id: Optional[str] = None
+    patient_created: bool = False
+    patient_updated: bool = False
+    error_message: Optional[str] = None
+    warnings: Optional[List[str]] = None
+    raw_data: Optional[dict] = None
+
+
+# ============================================================================
+# Configuration Endpoints
+# ============================================================================
+
+@router.get("/config", response_model=dict)
+async def get_config(db: Session = Depends(get_db)):
+    """Get active Khanza API configuration"""
+    try:
+        config = db.query(KhanzaConfig).filter(KhanzaConfig.is_active == True).first()
+        if not config:
+            return {"config": None, "message": "No active configuration found"}
+        return {"config": config.to_dict()}
+    except Exception as e:
+        logger.error(f"Error getting Khanza config: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/config", response_model=dict, status_code=201)
+async def create_config(
+    data: KhanzaConfigCreate,
+    db: Session = Depends(get_db)
+):
+    """Create or update Khanza API configuration"""
+    try:
+        # Deactivate existing configs
+        db.query(KhanzaConfig).update({KhanzaConfig.is_active: False})
+        
+        # Create new config
+        config = KhanzaConfig(
+            base_url=data.base_url,
+            api_key=data.api_key,
+            timeout_ms=data.timeout_ms,
+            is_active=True
+        )
+        db.add(config)
+        db.commit()
+        db.refresh(config)
+        
+        logger.info(f"Created Khanza config: {config.id}")
+        return {"config": config.to_dict(), "message": "Configuration saved successfully"}
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error creating Khanza config: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/config/{config_id}", response_model=dict)
+async def update_config(
+    config_id: str,
+    data: KhanzaConfigUpdate,
+    db: Session = Depends(get_db)
+):
+    """Update Khanza API configuration"""
+    try:
+        config = db.query(KhanzaConfig).filter(KhanzaConfig.id == config_id).first()
+        if not config:
+            raise HTTPException(status_code=404, detail="Configuration not found")
+        
+        update_data = data.dict(exclude_unset=True)
+        for key, value in update_data.items():
+            setattr(config, key, value)
+        
+        db.commit()
+        db.refresh(config)
+        
+        logger.info(f"Updated Khanza config: {config.id}")
+        return {"config": config.to_dict(), "message": "Configuration updated successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error updating Khanza config: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Procedure Mapping Endpoints
+# ============================================================================
+
+@router.get("/mappings/procedures", response_model=dict)
+async def list_procedure_mappings(
+    search: Optional[str] = Query(None, description="Search by code or name"),
+    modality: Optional[str] = Query(None, description="Filter by modality"),
+    is_active: Optional[bool] = Query(None, description="Filter by active status"),
+    limit: int = Query(50, ge=1, le=500, description="Maximum results"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
+    db: Session = Depends(get_db)
+):
+    """List procedure mappings with filters (Unified Table for Khanza)"""
+    try:
+        query = db.query(UnifiedProcedureMapping).filter(
+            UnifiedProcedureMapping.external_system_id == KHANZA_SYSTEM_ID
+        )
+
+        if search:
+            search_filter = or_(
+                UnifiedProcedureMapping.external_code.ilike(f"%{search}%"),
+                UnifiedProcedureMapping.external_name.ilike(f"%{search}%"),
+                UnifiedProcedureMapping.pacs_code.ilike(f"%{search}%"),
+                UnifiedProcedureMapping.pacs_name.ilike(f"%{search}%")
+            )
+            query = query.filter(search_filter)
+
+        if modality:
+            query = query.filter(UnifiedProcedureMapping.modality == modality)
+
+        if is_active is not None:
+            query = query.filter(UnifiedProcedureMapping.is_active == is_active)
+
+        total = query.count()
+        mappings = query.order_by(UnifiedProcedureMapping.external_code).offset(offset).limit(limit).all()
+
+        # Convert to legacy format expected by frontend
+        legacy_items = []
+        for m in mappings:
+            legacy_items.append({
+                'id': str(m.id),
+                'khanza_code': m.external_code,
+                'khanza_name': m.external_name,
+                'pacs_code': m.pacs_code,
+                'pacs_name': m.pacs_name,
+                'modality': m.modality,
+                'description': m.description,
+                'is_active': m.is_active,
+                'created_at': m.created_at.isoformat() if m.created_at else None,
+                'updated_at': m.updated_at.isoformat() if m.updated_at else None,
+                'created_by': m.created_by,
+                'updated_by': m.updated_by
+            })
+
+        return {
+            "items": legacy_items,
+            "total": total,
+            "limit": limit,
+            "offset": offset
+        }
+    except Exception as e:
+        logger.error(f"Error listing procedure mappings: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/mappings/procedures/unmapped", response_model=dict)
+async def list_unmapped_procedures(
+    search: Optional[str] = Query(None, description="Search by code or name"),
+    limit: int = Query(50, ge=1, le=500, description="Maximum results"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
+    db: Session = Depends(get_db)
+):
+    """List unmapped procedures captured from requests"""
+    try:
+        query = db.query(KhanzaUnmappedProcedure).filter(
+            KhanzaUnmappedProcedure.is_active == True
+        )
+        
+        if search:
+            search_filter = or_(
+                KhanzaUnmappedProcedure.khanza_code.ilike(f"%{search}%"),
+                KhanzaUnmappedProcedure.khanza_name.ilike(f"%{search}%")
+            )
+            query = query.filter(search_filter)
+        
+        total = query.count()
+        unmapped = query.order_by(KhanzaUnmappedProcedure.last_seen_at.desc()).offset(offset).limit(limit).all()
+        
+        return {
+            "items": [u.to_dict() for u in unmapped],
+            "total": total,
+            "limit": limit,
+            "offset": offset
+        }
+    except Exception as e:
+        logger.error(f"Error listing unmapped procedures: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/mappings/procedures/unmapped/{unmapped_id}", response_model=dict)
+async def delete_unmapped_procedure(
+    unmapped_id: str,
+    db: Session = Depends(get_db)
+):
+    """Delete (soft delete) unmapped procedure"""
+    try:
+        unmapped = db.query(KhanzaUnmappedProcedure).filter(
+            KhanzaUnmappedProcedure.id == unmapped_id
+        ).first()
+        
+        if not unmapped:
+            raise HTTPException(status_code=404, detail="Unmapped procedure not found")
+        
+        unmapped.is_active = False
+        db.commit()
+        
+        logger.info(f"Soft deleted unmapped procedure: {unmapped.khanza_code}")
+        return {"message": "Unmapped procedure deleted", "id": unmapped_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error deleting unmapped procedure: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/mappings/procedures/{mapping_id}", response_model=dict)
+async def get_procedure_mapping(
+    mapping_id: str,
+    db: Session = Depends(get_db)
+):
+    """Get procedure mapping by ID"""
+    try:
+        # Try Unified Table first
+        mapping = db.query(UnifiedProcedureMapping).filter(
+            UnifiedProcedureMapping.id == mapping_id
+        ).first()
+        
+        if mapping:
+            return {
+                'id': str(mapping.id),
+                'khanza_code': mapping.external_code,
+                'khanza_name': mapping.external_name,
+                'pacs_code': mapping.pacs_code,
+                'pacs_name': mapping.pacs_name,
+                'modality': mapping.modality,
+                'description': mapping.description,
+                'is_active': mapping.is_active,
+                'created_at': mapping.created_at.isoformat() if mapping.created_at else None,
+                'updated_at': mapping.updated_at.isoformat() if mapping.updated_at else None,
+                'created_by': mapping.created_by,
+                'updated_by': mapping.updated_by
+            }
+
+        # Try Legacy Table
+        mapping = db.query(KhanzaProcedureMapping).filter(
+            KhanzaProcedureMapping.id == mapping_id
+        ).first()
+        
+        if not mapping:
+            raise HTTPException(status_code=404, detail="Procedure mapping not found")
+        return mapping.to_dict()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting procedure mapping: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/mappings/procedures/by-code/{khanza_code}", response_model=dict)
+async def get_procedure_mapping_by_code(
+    khanza_code: str,
+    khanza_name: Optional[str] = Query(None, description="Khanza procedure name for tracking"),
+    db: Session = Depends(get_db)
+):
+    """Get procedure mapping by Khanza code (Unified Table Primary)"""
+    logger.info(f"DEBUG: Searching for procedure code: '{khanza_code}'")
+    try:
+        # 1. Try Unified Table (Recommended source)
+        unified_mapping = db.query(UnifiedProcedureMapping).filter(
+            and_(
+                UnifiedProcedureMapping.external_system_id == KHANZA_SYSTEM_ID,
+                UnifiedProcedureMapping.external_code == khanza_code,
+                UnifiedProcedureMapping.is_active == True
+            )
+        ).first()
+
+        if unified_mapping:
+            return {
+                'id': str(unified_mapping.id),
+                'khanza_code': unified_mapping.external_code,
+                'khanza_name': unified_mapping.external_name,
+                'pacs_code': unified_mapping.pacs_code,
+                'pacs_name': unified_mapping.pacs_name,
+                'modality': unified_mapping.modality,
+                'description': unified_mapping.description,
+                'is_active': unified_mapping.is_active,
+                'created_at': unified_mapping.created_at.isoformat() if unified_mapping.created_at else None,
+                'updated_at': unified_mapping.updated_at.isoformat() if unified_mapping.updated_at else None,
+                'created_by': unified_mapping.created_by,
+                'updated_by': unified_mapping.updated_by,
+                'is_migrated': True
+            }
+
+        # 2. Try Legacy Table (Fallback)
+        mapping = db.query(KhanzaProcedureMapping).filter(
+            and_(
+                KhanzaProcedureMapping.khanza_code == khanza_code,
+                KhanzaProcedureMapping.is_active == True
+            )
+        ).first()
+        
+        if mapping:
+            return mapping.to_dict()
+
+        # 3. Not found - Record as unmapped
+        if not khanza_name:
+            try:
+                khanza_api_url = os.getenv("KHANZA_API_URL")
+                khanza_api_key = os.getenv("KHANZA_API_KEY")
+                
+                if khanza_api_url and khanza_api_key:
+                    logger.info(f"Fetching procedure name from Khanza API: {khanza_api_url}/api/prosedur/{khanza_code}")
+                    async with httpx.AsyncClient() as client:
+                        resp = await client.get(
+                            f"{khanza_api_url}/api/prosedur/{khanza_code}",
+                            headers={"X-API-Key": khanza_api_key},
+                            timeout=5.0
+                        )
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            if "data" in data and "nm_perawatan" in data["data"]:
+                                khanza_name = data["data"]["nm_perawatan"]
+                                logger.info(f"Fetched name from Khanza API: {khanza_name}")
+            except Exception as e:
+                logger.warning(f"Failed to fetch name from Khanza API: {e}")
+
+        try:
+            unmapped = db.query(KhanzaUnmappedProcedure).filter(
+                KhanzaUnmappedProcedure.khanza_code == khanza_code
+            ).first()
+            
+            if unmapped:
+                unmapped.occurrence_count += 1
+                unmapped.last_seen_at = func.now()
+                unmapped.is_active = True
+                if khanza_name and not unmapped.khanza_name:
+                    unmapped.khanza_name = khanza_name
+            else:
+                unmapped = KhanzaUnmappedProcedure(
+                    khanza_code=khanza_code,
+                    khanza_name=khanza_name,
+                    is_active=True
+                )
+                db.add(unmapped)
+            
+            db.commit()
+            logger.info(f"Recorded unmapped procedure: {khanza_code}")
+        except Exception as save_err:
+            db.rollback()
+            logger.error(f"Error saving unmapped procedure: {str(save_err)}")
+
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Procedure mapping not found for code: {khanza_code}"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting procedure mapping by code: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/mappings/procedures", response_model=dict, status_code=201)
+async def create_procedure_mapping(
+    data: ProcedureMappingCreate,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """Create new procedure mapping (In Unified Table)"""
+    try:
+        # Check for duplicate in Unified Table
+        existing = db.query(UnifiedProcedureMapping).filter(
+            and_(
+                UnifiedProcedureMapping.external_system_id == KHANZA_SYSTEM_ID,
+                UnifiedProcedureMapping.external_code == data.khanza_code
+            )
+        ).first()
+        if existing:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Procedure mapping already exists for Khanza code: {data.khanza_code}"
+            )
+        
+        created_by = getattr(request.state, 'user_id', None) or 'system'
+        
+        mapping = UnifiedProcedureMapping(
+            external_system_id=KHANZA_SYSTEM_ID,
+            external_code=data.khanza_code,
+            external_name=data.khanza_name,
+            pacs_code=data.pacs_code,
+            pacs_name=data.pacs_name,
+            modality=data.modality,
+            description=data.description,
+            is_active=True,
+            created_by=created_by
+        )
+        db.add(mapping)
+        db.commit()
+        db.refresh(mapping)
+        
+        # Convert to legacy format
+        mapping_dict = {
+            'id': str(mapping.id),
+            'khanza_code': mapping.external_code,
+            'khanza_name': mapping.external_name,
+            'pacs_code': mapping.pacs_code,
+            'pacs_name': mapping.pacs_name,
+            'modality': mapping.modality,
+            'description': mapping.description,
+            'is_active': mapping.is_active
+        }
+        
+        logger.info(f"Created procedure mapping: {mapping.external_code} -> {mapping.pacs_code}")
+        return {"mapping": mapping_dict, "message": "Procedure mapping created successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error creating procedure mapping: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/mappings/procedures/{mapping_id}", response_model=dict)
+async def update_procedure_mapping(
+    mapping_id: str,
+    data: ProcedureMappingUpdate,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """Update procedure mapping"""
+    try:
+        # Try Unified first
+        mapping = db.query(UnifiedProcedureMapping).filter(
+            UnifiedProcedureMapping.id == mapping_id
+        ).first()
+        
+        target_table = "unified" if mapping else "legacy"
+        
+        if not mapping:
+            # Try Legacy
+            mapping = db.query(KhanzaProcedureMapping).filter(
+                KhanzaProcedureMapping.id == mapping_id
+            ).first()
+            
+        if not mapping:
+            raise HTTPException(status_code=404, detail="Procedure mapping not found")
+        
+        updated_by = getattr(request.state, 'user_id', None) or 'system'
+        update_data = data.dict(exclude_unset=True)
+        
+        if target_table == "unified":
+            # Map legacy fields to unified
+            if 'khanza_name' in update_data:
+                update_data['external_name'] = update_data.pop('khanza_name')
+            
+            for key, value in update_data.items():
+                setattr(mapping, key, value)
+            mapping.updated_by = updated_by
+            mapping.updated_at = datetime.utcnow()
+        else:
+            for key, value in update_data.items():
+                setattr(mapping, key, value)
+            mapping.updated_by = updated_by
+
+        db.commit()
+        db.refresh(mapping)
+        
+        logger.info(f"Updated {target_table} procedure mapping: {mapping_id}")
+        return {"mapping": mapping.to_dict() if target_table == "legacy" else {
+                'id': str(mapping.id),
+                'khanza_code': mapping.external_code,
+                'khanza_name': mapping.external_name,
+                'pacs_code': mapping.pacs_code,
+                'pacs_name': mapping.pacs_name,
+                'modality': mapping.modality,
+                'is_active': mapping.is_active
+            }, "message": "Procedure mapping updated successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error updating procedure mapping: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/mappings/procedures/{mapping_id}", response_model=dict)
+async def delete_procedure_mapping(
+    mapping_id: str,
+    hard_delete: bool = Query(False, description="Permanently delete instead of soft delete"),
+    db: Session = Depends(get_db)
+):
+    """Delete procedure mapping (soft delete by default)"""
+    try:
+        # Try Unified first
+        mapping = db.query(UnifiedProcedureMapping).filter(
+            UnifiedProcedureMapping.id == mapping_id
+        ).first()
+        
+        if not mapping:
+            # Try Legacy
+            mapping = db.query(KhanzaProcedureMapping).filter(
+                KhanzaProcedureMapping.id == mapping_id
+            ).first()
+            
+        if not mapping:
+            raise HTTPException(status_code=404, detail="Procedure mapping not found")
+        
+        if hard_delete:
+            db.delete(mapping)
+            message = "Procedure mapping permanently deleted"
+        else:
+            mapping.is_active = False
+            message = "Procedure mapping deactivated"
+        
+        db.commit()
+        return {"message": message, "id": mapping_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error deleting procedure mapping: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Doctor Mapping Endpoints
+# ============================================================================
+
+@router.get("/mappings/doctors", response_model=dict)
+async def list_doctor_mappings(
+    search: Optional[str] = Query(None, description="Search by code or name"),
+    auto_created: Optional[bool] = Query(None, description="Filter by auto-created status"),
+    limit: int = Query(50, ge=1, le=500, description="Maximum results"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
+    db: Session = Depends(get_db)
+):
+    """List doctor mappings with filters (Unified)"""
+    try:
+        query = db.query(UnifiedDoctorMapping).filter(
+            UnifiedDoctorMapping.external_system_id == KHANZA_SYSTEM_ID
+        )
+        
+        if search:
+            search_filter = or_(
+                UnifiedDoctorMapping.external_code.ilike(f"%{search}%"),
+                UnifiedDoctorMapping.external_name.ilike(f"%{search}%")
+            )
+            query = query.filter(search_filter)
+        
+        if auto_created is not None:
+            query = query.filter(UnifiedDoctorMapping.auto_created == auto_created)
+        
+        total = query.count()
+        mappings = query.order_by(UnifiedDoctorMapping.external_name).offset(offset).limit(limit).all()
+        
+        return {
+            "items": [{
+                'id': str(m.id),
+                'khanza_code': m.external_code,
+                'khanza_name': m.external_name,
+                'pacs_doctor_id': str(m.pacs_doctor_id) if m.pacs_doctor_id else None,
+                'auto_created': m.auto_created
+            } for m in mappings],
+            "total": total,
+            "limit": limit,
+            "offset": offset
+        }
+    except Exception as e:
+        logger.error(f"Error listing doctor mappings: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/mappings/doctors/{mapping_id}", response_model=dict)
+async def get_doctor_mapping(
+    mapping_id: str,
+    db: Session = Depends(get_db)
+):
+    """Get doctor mapping by ID"""
+    try:
+        mapping = db.query(UnifiedDoctorMapping).filter(
+            UnifiedDoctorMapping.id == mapping_id
+        ).first()
+        
+        if not mapping:
+            # Fallback to legacy
+            mapping = db.query(KhanzaDoctorMapping).filter(
+                KhanzaDoctorMapping.id == mapping_id
+            ).first()
+            if not mapping:
+                raise HTTPException(status_code=404, detail="Doctor mapping not found")
+            return mapping.to_dict()
+            
+        return {
+            'id': str(mapping.id),
+            'khanza_code': mapping.external_code,
+            'khanza_name': mapping.external_name,
+            'pacs_doctor_id': str(mapping.pacs_doctor_id) if mapping.pacs_doctor_id else None,
+            'auto_created': mapping.auto_created
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting doctor mapping: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/mappings/doctors/by-code/{khanza_code}", response_model=dict)
+async def get_doctor_mapping_by_code(
+    khanza_code: str,
+    db: Session = Depends(get_db)
+):
+    """Get doctor mapping by Khanza code"""
+    try:
+        mapping = db.query(UnifiedDoctorMapping).filter(
+            and_(
+                UnifiedDoctorMapping.external_system_id == KHANZA_SYSTEM_ID,
+                UnifiedDoctorMapping.external_code == khanza_code
+            )
+        ).first()
+        
+        if not mapping:
+            # Fallback to legacy
+            mapping = db.query(KhanzaDoctorMapping).filter(
+                KhanzaDoctorMapping.khanza_code == khanza_code
+            ).first()
+            
+        if not mapping:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Doctor mapping not found for code: {khanza_code}"
+            )
+            
+        if hasattr(mapping, 'external_code'):
+            return {
+                'id': str(mapping.id),
+                'khanza_code': mapping.external_code,
+                'khanza_name': mapping.external_name,
+                'pacs_doctor_id': str(mapping.pacs_doctor_id) if mapping.pacs_doctor_id else None,
+                'auto_created': mapping.auto_created
+            }
+        return mapping.to_dict()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting doctor mapping by code: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/mappings/doctors", response_model=dict, status_code=201)
+async def create_doctor_mapping(
+    data: DoctorMappingCreate,
+    db: Session = Depends(get_db)
+):
+    """Create new doctor mapping"""
+    try:
+        # Check for duplicate
+        existing = db.query(UnifiedDoctorMapping).filter(
+            and_(
+                UnifiedDoctorMapping.external_system_id == KHANZA_SYSTEM_ID,
+                UnifiedDoctorMapping.external_code == data.khanza_code
+            )
+        ).first()
+        if existing:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Doctor mapping already exists for Khanza code: {data.khanza_code}"
+            )
+        
+        mapping = UnifiedDoctorMapping(
+            external_system_id=KHANZA_SYSTEM_ID,
+            external_code=data.khanza_code,
+            external_name=data.khanza_name,
+            pacs_doctor_id=uuid.UUID(data.pacs_doctor_id) if data.pacs_doctor_id else None,
+            auto_created=False
+        )
+        db.add(mapping)
+        db.commit()
+        db.refresh(mapping)
+        
+        mapping_dict = {
+            'id': str(mapping.id),
+            'khanza_code': mapping.external_code,
+            'khanza_name': mapping.external_name,
+            'pacs_doctor_id': str(mapping.pacs_doctor_id) if mapping.pacs_doctor_id else None
+        }
+
+        logger.info(f"Created doctor mapping: {mapping.external_code} -> {mapping.pacs_doctor_id}")
+        return {"mapping": mapping_dict, "message": "Doctor mapping created successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error creating doctor mapping: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/mappings/doctors/{mapping_id}", response_model=dict)
+async def update_doctor_mapping(
+    mapping_id: str,
+    data: DoctorMappingUpdate,
+    db: Session = Depends(get_db)
+):
+    """Update doctor mapping"""
+    try:
+        # Try Unified
+        mapping = db.query(UnifiedDoctorMapping).filter(
+            UnifiedDoctorMapping.id == mapping_id
+        ).first()
+        
+        target = "unified" if mapping else "legacy"
+        
+        if not mapping:
+            mapping = db.query(KhanzaDoctorMapping).filter(
+                KhanzaDoctorMapping.id == mapping_id
+            ).first()
+            
+        if not mapping:
+            raise HTTPException(status_code=404, detail="Doctor mapping not found")
+
+        if target == "unified":
+            if data.khanza_name is not None:
+                mapping.external_name = data.khanza_name
+            if data.pacs_doctor_id is not None:
+                mapping.pacs_doctor_id = uuid.UUID(data.pacs_doctor_id) if data.pacs_doctor_id else None
+        else:
+            if data.khanza_name is not None:
+                mapping.khanza_name = data.khanza_name
+            if data.pacs_doctor_id is not None:
+                mapping.pacs_doctor_id = uuid.UUID(data.pacs_doctor_id) if data.pacs_doctor_id else None
+
+        db.commit()
+        db.refresh(mapping)
+
+        logger.info(f"Updated {target} doctor mapping: {mapping.id}")
+        return {"mapping": mapping.to_dict() if target == "legacy" else {
+            'id': str(mapping.id),
+            'khanza_code': mapping.external_code,
+            'khanza_name': mapping.external_name,
+            'pacs_doctor_id': str(mapping.pacs_doctor_id) if mapping.pacs_doctor_id else None
+        }, "message": "Doctor mapping updated successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error updating doctor mapping: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/mappings/doctors/{mapping_id}", response_model=dict)
+async def delete_doctor_mapping(
+    mapping_id: str,
+    db: Session = Depends(get_db)
+):
+    """Delete doctor mapping"""
+    try:
+        mapping = db.query(UnifiedDoctorMapping).filter(
+            UnifiedDoctorMapping.id == mapping_id
+        ).first()
+        
+        if not mapping:
+            mapping = db.query(KhanzaDoctorMapping).filter(
+                KhanzaDoctorMapping.id == mapping_id
+            ).first()
+            
+        if not mapping:
+            raise HTTPException(status_code=404, detail="Doctor mapping not found")
+
+        db.delete(mapping)
+        db.commit()
+        
+        logger.info(f"Deleted doctor mapping: {mapping_id}")
+        return {"message": "Doctor mapping deleted", "id": mapping_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error deleting doctor mapping: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Import History Endpoints
+# ============================================================================
+
+@router.get("/import-history", response_model=dict)
+async def list_import_history(
+    search: Optional[str] = Query(None, description="Search by order number or patient name"),
+    import_status: Optional[str] = Query(None, description="Filter by status (success, failed, partial)"),
+    date_from: Optional[date] = Query(None, description="Filter from date"),
+    date_to: Optional[date] = Query(None, description="Filter to date"),
+    limit: int = Query(50, ge=1, le=500, description="Maximum results"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
+    db: Session = Depends(get_db)
+):
+    """List import history with filters (Unified Table)"""
+    try:
+        query = db.query(UnifiedImportHistory).filter(
+            UnifiedImportHistory.external_system_id == KHANZA_SYSTEM_ID
+        )
+        
+        if search:
+            search_filter = or_(
+                UnifiedImportHistory.external_order_id.ilike(f"%{search}%"),
+                UnifiedImportHistory.patient_name.ilike(f"%{search}%"),
+                UnifiedImportHistory.patient_mrn.ilike(f"%{search}%")
+            )
+            query = query.filter(search_filter)
+
+        if import_status:
+            query = query.filter(UnifiedImportHistory.import_status == import_status)
+
+        if date_from:
+            query = query.filter(UnifiedImportHistory.imported_at >= datetime.combine(date_from, datetime.min.time()))
+
+        if date_to:
+            query = query.filter(UnifiedImportHistory.imported_at <= datetime.combine(date_to, datetime.max.time()))
+
+        total = query.count()
+        history = query.order_by(UnifiedImportHistory.imported_at.desc()).offset(offset).limit(limit).all()
+
+        return {
+            "items": [{
+                'id': str(h.id),
+                'noorder': h.external_order_id,
+                'no_rawat': h.external_visit_id,
+                'no_rkm_medis': h.patient_mrn,
+                'patient_name': h.patient_name,
+                'procedure_name': h.procedure_name,
+                'import_status': h.import_status,
+                'worklist_item_id': str(h.worklist_item_id) if h.worklist_item_id else None,
+                'imported_at': h.imported_at.isoformat()
+            } for h in history],
+            "total": total,
+            "limit": limit,
+            "offset": offset
+        }
+    except Exception as e:
+        logger.error(f"Error listing import history: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/import-history/{history_id}", response_model=dict)
+async def get_import_history_detail(
+    history_id: str,
+    db: Session = Depends(get_db)
+):
+    """Get import history detail by ID"""
+    try:
+        history = db.query(UnifiedImportHistory).filter(
+            UnifiedImportHistory.id == history_id
+        ).first()
+        
+        if not history:
+            history = db.query(KhanzaImportHistory).filter(
+                KhanzaImportHistory.id == history_id
+            ).first()
+            
+        if not history:
+            raise HTTPException(status_code=404, detail="Import history not found")
+        return history.to_dict()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting import history: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/import-history/by-order/{noorder}", response_model=dict)
+async def get_import_history_by_order(
+    noorder: str,
+    db: Session = Depends(get_db)
+):
+    """Get import history by order number (Unified)"""
+    try:
+        history = db.query(UnifiedImportHistory).filter(
+            and_(
+                UnifiedImportHistory.external_system_id == KHANZA_SYSTEM_ID,
+                UnifiedImportHistory.external_order_id == noorder
+            )
+        ).order_by(UnifiedImportHistory.imported_at.desc()).first()
+        
+        if not history:
+            return {"imported": False, "history": None}
+            
+        return {"imported": True, "history": {
+            'id': str(history.id),
+            'noorder': history.external_order_id,
+            'import_status': history.import_status,
+            'imported_at': history.imported_at.isoformat()
+        }}
+    except Exception as e:
+        logger.error(f"Error getting import history by order: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/import-history/check/{noorder}", response_model=dict)
+async def check_order_imported(
+    noorder: str,
+    db: Session = Depends(get_db)
+):
+    """Check if an order has been imported"""
+    try:
+        history = db.query(UnifiedImportHistory).filter(
+            and_(
+                UnifiedImportHistory.external_system_id == KHANZA_SYSTEM_ID,
+                UnifiedImportHistory.external_order_id == noorder,
+                UnifiedImportHistory.import_status == 'success'
+            )
+        ).first()
+        return {
+            "noorder": noorder,
+            "imported": history is not None,
+            "import_id": str(history.id) if history else None,
+            "imported_at": history.imported_at.isoformat() if history else None
+        }
+    except Exception as e:
+        logger.error(f"Error checking order import status: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/import-history", response_model=ImportHistoryResponse, status_code=201)
+async def create_import_history(
+    data: ImportHistoryCreate,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    Record import history (audit log)
+    Used by frontend to record failed imports or other client-side import events
+    """
+    try:
+        # Get user from request if available
+        imported_by = getattr(request.state, 'user_id', None) or 'system'
+        
+        # Convert worklist_item_id string to UUID if present
+        wlid = None
+        if data.worklist_item_id:
+            try:
+                wlid = uuid.UUID(data.worklist_item_id)
+                
+                # Verify worklist item exists to prevent foreign key violation
+                if wlid:
+                    worklist_exists = db.query(WorklistItem.id).filter(WorklistItem.id == wlid).first()
+                    if not worklist_exists:
+                        logger.warning(f"Worklist item {wlid} not found for history record, setting worklist_item_id to None")
+                        wlid = None
+            except ValueError:
+                pass # Ignore invalid UUID
+        
+        history = UnifiedImportHistory(
+            external_system_id=KHANZA_SYSTEM_ID,
+            external_order_id=data.noorder,
+            external_visit_id=data.no_rawat,
+            patient_mrn=data.no_rkm_medis,
+            patient_name=data.patient_name,
+            procedure_name=data.procedure_name,
+            import_status=data.import_status,
+            worklist_item_id=wlid,
+            patient_created=data.patient_created,
+            patient_updated=data.patient_updated,
+            error_message=data.error_message,
+            warnings=data.warnings,
+            raw_data=data.raw_data,
+            imported_by=imported_by
+        )
+        
+        db.add(history)
+        db.commit()
+        db.refresh(history)
+        
+        logger.info(f"Recorded import history for {data.noorder}: {data.import_status}")
+        
+        return {
+            'id': str(history.id),
+            'noorder': history.external_order_id,
+            'no_rawat': history.external_visit_id,
+            'no_rkm_medis': history.patient_mrn,
+            'patient_name': history.patient_name,
+            'procedure_name': history.procedure_name,
+            'import_status': history.import_status,
+            'worklist_item_id': str(history.worklist_item_id) if history.worklist_item_id else None,
+            'patient_created': history.patient_created,
+            'patient_updated': history.patient_updated,
+            'error_message': history.error_message,
+            'warnings': history.warnings,
+            'imported_by': history.imported_by,
+            'imported_at': history.imported_at.isoformat()
+        }
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error creating import history: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Import Processing Endpoint
+# ============================================================================
+
+@router.post("/import", response_model=dict)
+async def import_order(
+    data: ImportOrderRequest,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    Import a radiology order from Khanza to PACS worklist. (Unified Version)
+    """
+    errors = []
+    warnings = []
+    patient_created = False
+    patient_updated = False
+    worklist_item_id = None
+    
+    try:
+        imported_by = getattr(request.state, 'user_id', None) or 'system'
+        
+        # 1. Check if order already imported (Unified)
+        existing_import = db.query(UnifiedImportHistory).filter(
+            and_(
+                UnifiedImportHistory.external_system_id == KHANZA_SYSTEM_ID,
+                UnifiedImportHistory.external_order_id == data.noorder,
+                UnifiedImportHistory.import_status == 'success'
+            )
+        ).first()
+        
+        if existing_import:
+            return {
+                "success": False,
+                "noorder": data.noorder,
+                "worklist_item_id": str(existing_import.worklist_item_id) if existing_import.worklist_item_id else None,
+                "patient_created": False,
+                "patient_updated": False,
+                "errors": [f"Order {data.noorder} has already been imported"],
+                "warnings": None
+            }
+        
+        # 2. Validate procedure mapping (Unified)
+        procedure_mapping = db.query(UnifiedProcedureMapping).filter(
+            and_(
+                UnifiedProcedureMapping.external_system_id == KHANZA_SYSTEM_ID,
+                UnifiedProcedureMapping.external_code == data.kd_jenis_prw,
+                UnifiedProcedureMapping.is_active == True
+            )
+        ).first()
+        
+        if not procedure_mapping:
+            # Fallback to legacy
+            procedure_mapping = db.query(KhanzaProcedureMapping).filter(
+                and_(
+                    KhanzaProcedureMapping.khanza_code == data.kd_jenis_prw,
+                    KhanzaProcedureMapping.is_active == True
+                )
+            ).first()
+        
+        if not procedure_mapping:
+            error_msg = f"Prosedur {data.nm_perawatan} (kode: {data.kd_jenis_prw}) belum di-mapping ke PACS."
+            errors.append(error_msg)
+            
+            # Record failed import (Unified)
+            history = UnifiedImportHistory(
+                external_system_id=KHANZA_SYSTEM_ID,
+                external_order_id=data.noorder,
+                external_visit_id=data.no_rawat,
+                patient_mrn=data.no_rkm_medis,
+                patient_name=data.patient_name,
+                procedure_code=data.kd_jenis_prw,
+                procedure_name=data.nm_perawatan,
+                import_status='failed',
+                error_message=error_msg,
+                raw_data=data.raw_data,
+                imported_by=imported_by
+            )
+            db.add(history)
+            db.commit()
+
+            return {"success": False, "noorder": data.noorder, "errors": errors}
+
+        # 3. Handle doctor mapping (Unified)
+        doctor_name = data.nm_dokter
+        if data.kd_dokter:
+            doctor_mapping = db.query(UnifiedDoctorMapping).filter(
+                and_(
+                    UnifiedDoctorMapping.external_system_id == KHANZA_SYSTEM_ID,
+                    UnifiedDoctorMapping.external_code == data.kd_dokter
+                )
+            ).first()
+            
+            if not doctor_mapping and data.nm_dokter:
+                doctor_mapping = UnifiedDoctorMapping(
+                    external_system_id=KHANZA_SYSTEM_ID,
+                    external_code=data.kd_dokter,
+                    external_name=data.nm_dokter,
+                    auto_created=True
+                )
+                db.add(doctor_mapping)
+                db.flush()
+        
+        # 4. Map patient sex
+        patient_gender = 'M' if data.patient_sex and data.patient_sex.upper() == 'L' else 'F' if data.patient_sex and data.patient_sex.upper() == 'P' else None
+        
+        # 5. Parse dates
+        try:
+            scheduled_date = datetime.strptime(data.tgl_permintaan, '%Y-%m-%d').date()
+        except:
+            scheduled_date = date.today()
+        
+        scheduled_time = datetime.now().time()
+        if data.jam_permintaan:
+            try:
+                scheduled_time = datetime.strptime(data.jam_permintaan, '%H:%M:%S').time()
+            except:
+                pass
+
+        # 6. Accession Number (Universal Strategy)
+        import uuid as uuid_module
+        study_instance_uid = f"1.2.826.0.1.3680043.8.498.{uuid_module.uuid4().int >> 64}"
+        
+        accession_number = await get_next_accession(
+            modality=procedure_mapping.modality or 'OT',
+            patient_data=data.dict()
+        )
+        
+        if not accession_number:
+            accession_number = f"KHZ{data.noorder}"
+            warnings.append("Accession API failed, fell back to legacy pattern")
+            
+        sps_id = f"SPS{data.noorder}"
+        
+        # 7. Create worklist item
+        worklist_item = WorklistItem(
+            study_instance_uid=study_instance_uid,
+            accession_number=accession_number,
+            sps_id=sps_id,
+            sps_status='SCHEDULED',
+            scheduled_procedure_step_start_date=scheduled_date,
+            scheduled_procedure_step_start_time=scheduled_time,
+            scheduled_procedure_step_description=procedure_mapping.pacs_name if hasattr(procedure_mapping, 'pacs_name') else procedure_mapping.khanza_name,
+            modality=procedure_mapping.modality or 'OT',
+            patient_id=data.no_rkm_medis,
+            patient_name=data.patient_name,
+            patient_birth_date=datetime.strptime(data.patient_birthdate, '%Y-%m-%d').date() if data.patient_birthdate else None,
+            patient_gender=patient_gender,
+            referring_physician_name=doctor_name,
+            requested_procedure_id=procedure_mapping.pacs_code,
+            requested_procedure_description=procedure_mapping.pacs_name if hasattr(procedure_mapping, 'pacs_name') else procedure_mapping.khanza_name,
+            priority='ROUTINE',
+            is_active=True,
+            dicom_attributes={
+                'khanza_noorder': data.noorder,
+                'khanza_no_rawat': data.no_rawat,
+                'khanza_kd_jenis_prw': data.kd_jenis_prw
+            }
+        )
+        db.add(worklist_item)
+        db.flush()
+        
+        worklist_item_id = str(worklist_item.id)
+        
+        # 8. Record successful import (Unified)
+        history = UnifiedImportHistory(
+            external_system_id=KHANZA_SYSTEM_ID,
+            external_order_id=data.noorder,
+            external_visit_id=data.no_rawat,
+            patient_mrn=data.no_rkm_medis,
+            patient_name=data.patient_name,
+            procedure_code=data.kd_jenis_prw,
+            procedure_name=worklist_item.scheduled_procedure_step_description,
+            import_status='success',
+            worklist_item_id=worklist_item.id,
+            patient_created=patient_created,
+            patient_updated=patient_updated,
+            warnings=warnings if warnings else None,
+            raw_data=data.raw_data,
+            imported_by=imported_by
+        )
+        db.add(history)
+        db.commit()
+        
+        return {
+            "success": True,
+            "noorder": data.noorder,
+            "worklist_item_id": worklist_item_id,
+            "warnings": warnings if warnings else None
+        }
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error importing order {data.noorder}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/import/batch", response_model=dict)
+async def import_orders_batch(
+    orders: List[ImportOrderRequest],
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """Import multiple orders in batch"""
+    results = []
+    success_count = 0
+    failed_count = 0
+    
+    for order_data in orders:
+        try:
+            result = await import_order(order_data, request, db)
+            results.append(result)
+            if result.get('success'): success_count += 1
+            else: failed_count += 1
+        except Exception as e:
+            results.append({"success": False, "noorder": order_data.noorder, "errors": [str(e)]})
+            failed_count += 1
+    
+    return {"total": len(orders), "success_count": success_count, "failed_count": failed_count, "results": results}
+
+@router.get("/health")
+async def khanza_health():
+    """Khanza integration service health check"""
+    return {"status": "healthy", "service": "khanza-integration", "timestamp": datetime.now().isoformat()}
+
+
+@router.get("/diagnostic/patients", response_model=dict)
+async def diagnostic_patients(
+    limit: int = 5,
+    db: Session = Depends(get_db),
+    request: Request = None
+):
+    """Diagnostic endpoint to verify multi-tenant isolation"""
+    tenant_id = request.headers.get("X-Tenant-ID")
+    if not tenant_id:
+         raise HTTPException(status_code=400, detail="X-Tenant-ID header is required")
+         
+    config = get_khanza_bridge_config(db, tenant_id)
+    url = f"{config['base_url']}/api/pasien?direct=true&limit={limit}"
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.get(url, headers=config['headers'], timeout=10.0)
+            return {
+                "tenant_id": tenant_id,
+                "bridge_url": url,
+                "bridge_response": resp.json() if resp.status_code == 200 else resp.text,
+                "status": resp.status_code
+            }
+        except Exception as e:
+            return {"error": str(e), "tenant_id": tenant_id}

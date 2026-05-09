@@ -1,0 +1,192 @@
+@import './animations.css';
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --sidebar-width: 260px;
+  
+  /* Default theme colors (Professional Blue) - will be overridden by ThemeProvider */
+  --theme-primary: #1e40af;
+  --theme-primary-dark: #1e3a8a;
+  --theme-accent: #3b82f6;
+  --theme-accent-light: #93c5fd;
+  --theme-sidebar-bg: #f8fafc;
+  --theme-sidebar-text: #334155;
+  --theme-sidebar-active: #dbeafe;
+  --theme-sidebar-hover: #f1f5f9;
+  --theme-header-bg: #ffffff;
+  --theme-header-text: #1e293b;
+  --theme-button-primary: #2563eb;
+  --theme-button-primary-hover: #1d4ed8;
+  --theme-login-gradient-from: #1e40af;
+  --theme-login-gradient-to: #3b82f6;
+  --theme-login-card-bg: #ffffff;
+}
+
+body, html, #root {
+  height: 100%;
+}
+
+.table {
+  @apply w-full border-collapse;
+}
+.table th, .table td {
+  @apply border border-slate-200 px-3 py-2 text-sm;
+}
+.badge {
+  @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium;
+}
+.badge-green { @apply bg-green-100 text-green-700; }
+.badge-yellow { @apply bg-yellow-100 text-yellow-700; }
+.badge-gray { @apply bg-gray-100 text-gray-600; }
+.badge-red { @apply bg-red-100 text-red-700; }
+.link { @apply text-blue-600 hover:underline; }
+.card { @apply bg-white rounded-xl border border-slate-200 p-5; box-shadow: none; }
+
+/* Theme-aware link */
+.link-themed {
+  color: var(--theme-primary);
+}
+.link-themed:hover {
+  text-decoration: underline;
+}
+
+/* Theme-aware primary button */
+.btn-themed-primary {
+  @apply px-6 py-2 rounded-lg font-medium text-sm text-white transition-colors;
+  background-color: var(--theme-button-primary);
+}
+.btn-themed-primary:hover {
+  background-color: var(--theme-button-primary-hover);
+}
+.btn-themed-primary:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--theme-accent-light);
+}
+.btn-themed-primary:disabled {
+  @apply opacity-50 cursor-not-allowed;
+}
+
+/* Theme-aware secondary/outline button */
+.btn-themed-secondary {
+  @apply px-6 py-2 rounded-lg font-medium text-sm transition-colors border;
+  color: var(--theme-primary);
+  border-color: var(--theme-primary);
+  background-color: transparent;
+}
+.btn-themed-secondary:hover {
+  background-color: var(--theme-accent-light);
+}
+.btn-themed-secondary:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--theme-accent-light);
+}
+.btn-themed-secondary:disabled {
+  @apply opacity-50 cursor-not-allowed;
+}
+
+/* Theme-aware small button */
+.btn-themed-sm {
+  @apply px-3 py-1.5 rounded-md font-medium text-xs text-white transition-colors;
+  background-color: var(--theme-button-primary);
+}
+.btn-themed-sm:hover {
+  background-color: var(--theme-button-primary-hover);
+}
+.btn-themed-sm:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--theme-accent-light);
+}
+.btn-themed-sm:disabled {
+  @apply opacity-50 cursor-not-allowed;
+}
+
+/* Theme-aware form input focus */
+.input-themed:focus {
+  outline: none;
+  border-color: var(--theme-primary);
+  box-shadow: 0 0 0 3px var(--theme-accent-light);
+}
+
+/* Theme-aware form input */
+.input-themed {
+  @apply w-full px-3 py-2 border border-slate-300 rounded-lg transition-colors;
+}
+
+/* Disabled/readonly state for inputs */
+.input-themed:disabled,
+.input-themed[readonly] {
+  @apply opacity-50 cursor-not-allowed bg-gray-100;
+}
+
+/* Theme-aware select */
+.select-themed {
+  @apply w-full px-3 py-2 border border-slate-300 rounded-lg transition-colors;
+}
+.select-themed:focus {
+  outline: none;
+  border-color: var(--theme-primary);
+  box-shadow: 0 0 0 3px var(--theme-accent-light);
+}
+
+/* Disabled state for selects */
+.select-themed:disabled {
+  @apply opacity-50 cursor-not-allowed bg-gray-100;
+}
+
+/* Theme-aware checkbox */
+.checkbox-themed:checked {
+  background-color: var(--theme-primary);
+  border-color: var(--theme-primary);
+}
+
+/* Theme-aware card */
+.card-themed {
+  @apply bg-white rounded-xl border p-4;
+  border-color: color-mix(in srgb, var(--theme-primary) 16%, #ffffff);
+  box-shadow: none;
+}
+.card-themed:focus-within {
+  box-shadow: 0 0 0 3px var(--theme-accent-light);
+}
+
+/* Theme-aware header/title text */
+.text-themed-primary {
+  color: var(--theme-primary);
+}
+
+.text-themed-accent {
+  color: var(--theme-accent);
+}
+
+/* Theme-aware background */
+.bg-themed-primary {
+  background-color: var(--theme-primary);
+}
+
+.bg-themed-accent {
+  background-color: var(--theme-accent);
+}
+
+.bg-themed-accent-light {
+  background-color: var(--theme-accent-light);
+}
+
+/* Theme-aware sidebar background */
+.bg-themed-sidebar {
+  background-color: var(--theme-sidebar-bg);
+}
+
+/* Theme-aware header background */
+.bg-themed-header {
+  background-color: var(--theme-header-bg);
+}
+
+/* Info/alert box for filter summaries, notices */
+.alert-info {
+  @apply text-sm rounded px-3 py-2 border;
+  background-color: color-mix(in srgb, var(--theme-accent) 10%, transparent);
+  border-color: var(--theme-accent);
+  color: var(--theme-primary);
+}

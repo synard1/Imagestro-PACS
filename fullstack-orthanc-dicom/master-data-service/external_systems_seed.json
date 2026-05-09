@@ -1,0 +1,44 @@
+[
+  {
+    "system_code": "SIMRS_RSUD",
+    "system_name": "SIMRS RSUD Provinsi",
+    "system_type": "SIMRS",
+    "system_version": "3.2.1",
+    "vendor": "PT Solusi Kesehatan Indonesia",
+    "base_url": "http://simrs.rsud.local",
+    "api_endpoint": "http://simrs.rsud.local/api/v1",
+    "auth_type": "bearer_token",
+    "contact_person": "Ahmad IT Support",
+    "contact_email": "it@rsud.go.id",
+    "is_active": true,
+    "notes": "SIMRS utama rumah sakit"
+  },
+  {
+    "system_code": "HIS_SILOAM",
+    "system_name": "HIS Siloam Hospital",
+    "system_type": "HIS",
+    "system_version": "2.5.0",
+    "vendor": "Siloam IT Division",
+    "base_url": "https://his.siloam.local",
+    "api_endpoint": "https://his.siloam.local/api",
+    "auth_type": "api_key",
+    "contact_person": "Dr. Budi Santoso",
+    "contact_email": "budi.santoso@siloam.co.id",
+    "is_active": true,
+    "notes": "Hospital Information System Siloam"
+  },
+  {
+    "system_code": "RIS_MEDIS",
+    "system_name": "RIS Medis Indonesia",
+    "system_type": "RIS",
+    "system_version": "4.1.2",
+    "vendor": "PT Medis Technology",
+    "base_url": "http://ris.medis.local",
+    "api_endpoint": "http://ris.medis.local/rest/api",
+    "auth_type": "basic_auth",
+    "contact_person": "Siti Nurhaliza",
+    "contact_email": "support@medis.co.id",
+    "is_active": true,
+    "notes": "Radiology Information System"
+  }
+]

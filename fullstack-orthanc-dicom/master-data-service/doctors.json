@@ -1,0 +1,120 @@
+[
+  {
+    "_meta": {
+      "protected": true,
+      "purpose": "SATUSEHAT testing data - READ ONLY",
+      "warning": "Do not modify this data. It is used for official SATUSEHAT integration testing.",
+      "source": "https://satusehat.kemkes.go.id/platform/docs/id/api-catalogue/onboardings/apis/practitioner/"
+    }
+  },
+  {
+    "id": "d1a2b3c4-e5f6-7890-abcd-ef1234567890",
+    "practitioner_id": "10009880728",
+    "nik": "7209061211900001",
+    "name": "dr. Alexander",
+    "license": "STR-7209061211900001",
+    "specialty": "General",
+    "phone": "+62-812-0001-0001",
+    "birth_date": "1994-01-01",
+    "gender": "M"
+  },
+  {
+    "id": "e2b3c4d5-f6a7-8901-bcde-f23456789012",
+    "practitioner_id": "10006926841",
+    "nik": "3322071302900002",
+    "name": "dr. Yoga Yandika, Sp.A",
+    "license": "STR-3322071302900002",
+    "specialty": "Pediatrics",
+    "phone": "+62-812-0002-0002",
+    "birth_date": "1995-02-02",
+    "gender": "M"
+  },
+  {
+    "id": "f3c4d5e6-a7b8-9012-cdef-345678901234",
+    "practitioner_id": "10001354453",
+    "nik": "3171071609900003",
+    "name": "dr. Syarifuddin, Sp.Pd.",
+    "license": "STR-3171071609900003",
+    "specialty": "Internal Medicine",
+    "phone": "+62-812-0003-0003",
+    "birth_date": "1988-03-03",
+    "gender": "M"
+  },
+  {
+    "id": "a4d5e6f7-b8c9-0123-def0-456789012345",
+    "practitioner_id": "10010910332",
+    "nik": "3207192310600004",
+    "name": "dr. Nicholas Evan, Sp.B.",
+    "license": "STR-3207192310600004",
+    "specialty": "Surgery",
+    "phone": "+62-812-0004-0004",
+    "birth_date": "1986-04-04",
+    "gender": "M"
+  },
+  {
+    "id": "b5e6f7a8-c9d0-1234-ef01-567890123456",
+    "practitioner_id": "10018180913",
+    "nik": "6408130207800005",
+    "name": "dr. Dito Arifin, Sp.M.",
+    "license": "STR-6408130207800005",
+    "specialty": "Internal Medicine",
+    "phone": "+62-812-0005-0005",
+    "birth_date": "1985-05-05",
+    "gender": "M"
+  },
+  {
+    "id": "c6f7a8b9-d0e1-2345-f012-678901234567",
+    "practitioner_id": "10002074224",
+    "nik": "3217040109800006",
+    "name": "dr. Olivia Kirana, Sp.OG",
+    "license": "STR-3217040109800006",
+    "specialty": "Obstetrics and Gynecology",
+    "phone": "+62-812-0006-0006",
+    "birth_date": "1984-06-06",
+    "gender": "F"
+  },
+  {
+    "id": "d7a8b9c0-e1f2-3456-0123-789012345678",
+    "practitioner_id": "10012572188",
+    "nik": "3519111703800007",
+    "name": "dr. Alicia Chrissy, Sp.N.",
+    "license": "STR-3519111703800007",
+    "specialty": "Neurology",
+    "phone": "+62-812-0007-0007",
+    "birth_date": "1982-07-07",
+    "gender": "F"
+  },
+  {
+    "id": "e8b9c0d1-f2a3-4567-1234-890123456789",
+    "practitioner_id": "10018452434",
+    "nik": "5271002009700008",
+    "name": "dr. Nathalie Tan, Sp.PK.",
+    "license": "STR-5271002009700008",
+    "specialty": "Clinical Pathology",
+    "phone": "+62-812-0008-0008",
+    "birth_date": "1981-08-08",
+    "gender": "F"
+  },
+  {
+    "id": "f9c0d1e2-a3b4-5678-2345-901234567890",
+    "practitioner_id": "10014058550",
+    "nik": "3313096403900009",
+    "name": "Sheila Annisa S.Kep",
+    "license": "STR-3313096403900009",
+    "specialty": "Nursing",
+    "phone": "+62-812-0009-0009",
+    "birth_date": "1980-09-09",
+    "gender": "F"
+  },
+  {
+    "id": "a0d1e2f3-b4c5-6789-3456-012345678901",
+    "practitioner_id": "10001915884",
+    "nik": "3578083008700010",
+    "name": "apt. Aditya Pradhana, S.Farm.",
+    "license": "STR-3578083008700010",
+    "specialty": "Pharmacy",
+    "phone": "+62-812-0010-0010",
+    "birth_date": "1980-10-10",
+    "gender": "F"
+  }
+]

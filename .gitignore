@@ -1,0 +1,36 @@
+﻿# Dependencies
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+
+# Build
+dist/
+build/
+
+# Environment
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+
+# System/IDE
+.DS_Store
+.vscode/
+.idea/
+.claude/
+.gemini/
+.gemini_security/
+.wt/
+
+# Project Specific
+data/
+uploads/
+backups_archived/
+tmp/
+.tmp/

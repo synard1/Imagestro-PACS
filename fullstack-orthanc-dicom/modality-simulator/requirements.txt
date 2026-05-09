@@ -1,0 +1,5 @@
+pydicom==3.0.0
+pynetdicom==3.0.0
+flask==3.0.0
+numpy==1.26.0
+gunicorn==22.0.0

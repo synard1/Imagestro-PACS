@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Date Calculation Test</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+
+        .test-result {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 10px 0;
+            border-left: 4px solid #007bff;
+        }
+
+        .label {
+            font-weight: bold;
+            color: #555;
+            display: inline-block;
+            width: 180px;
+        }
+
+        .value {
+            color: #007bff;
+            font-family: monospace;
+            font-size: 16px;
+        }
+
+        .success {
+            border-left-color: #28a745;
+        }
+
+        .success .value {
+            color: #28a745;
+        }
+
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-top: 15px;
+        }
+
+        button:hover {
+            background: #0056b3;
+        }
+
+        .info {
+            background: #e7f3ff;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+            border-left: 4px solid #2196F3;
+        }
+
+        .info-title {
+            font-weight: bold;
+            color: #1976D2;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>🗓️ Date Calculation Test</h1>
+        <p>Test untuk verifikasi perhitungan tanggal 30 hari kebelakang</p>
+
+        <div id="results"></div>
+
+        <button onclick="runTest()">🔄 Run Test Again</button>
+
+        <div class="info">
+            <div class="info-title">Expected Behavior:</div>
+            <ul style="margin: 5px 0; padding-left: 20px;">
+                <li>End Date (Today): <strong>2025-12-09</strong></li>
+                <li>Start Date (30 days ago): <strong>2025-11-09</strong></li>
+                <li>Format: YYYY-MM-DD (ISO format for input[type="date"])</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        function runTest() {
+            const resultsDiv = document.getElementById('results');
+
+            // Calculate like the component does
+            const today = new Date();
+            const thirtyDaysAgo = new Date();
+            thirtyDaysAgo.setDate(today.getDate() - 30);
+
+            // Format dates as YYYY-MM-DD using local timezone
+            const formatLocalDate = (date) => {
+                const year = date.getFullYear();
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const day = String(date.getDate()).padStart(2, '0');
+                return `${year}-${month}-${day}`;
+            };
+
+            const todayStr = formatLocalDate(today);
+            const thirtyDaysAgoStr = formatLocalDate(thirtyDaysAgo);
+
+            // Also test with ISO method (old method)
+            const todayISO = today.toISOString().split('T')[0];
+            const thirtyDaysAgoISO = thirtyDaysAgo.toISOString().split('T')[0];
+
+            const isCorrect = todayStr === '2025-12-09' && thirtyDaysAgoStr === '2025-11-09';
+
+            resultsDiv.innerHTML = `
+                <div class="test-result ${isCorrect ? 'success' : ''}">
+                    <div><span class="label">Current Date/Time:</span><span class="value">${new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })}</span></div>
+                </div>
+                
+                <div class="test-result ${isCorrect ? 'success' : ''}">
+                    <div><span class="label">End Date (Today):</span><span class="value">${todayStr}</span></div>
+                    <div><span class="label">Start Date (30 days ago):</span><span class="value">${thirtyDaysAgoStr}</span></div>
+                </div>
+                
+                <div class="test-result">
+                    <div style="font-weight: bold; margin-bottom: 10px;">Comparison with ISO method:</div>
+                    <div><span class="label">Local Method (NEW):</span><span class="value">${todayStr}</span></div>
+                    <div><span class="label">ISO Method (OLD):</span><span class="value">${todayISO}</span></div>
+                    <div style="margin-top: 10px; color: ${todayStr === todayISO ? '#28a745' : '#dc3545'};">
+                        ${todayStr === todayISO ? '✅ Both methods produce same result' : '⚠️ Methods produce different results (timezone issue!)'}
+                    </div>
+                </div>
+                
+                <div class="test-result">
+                    <div style="font-weight: bold; margin-bottom: 10px;">Date Details:</div>
+                    <div><span class="label">Year:</span><span class="value">${today.getFullYear()}</span></div>
+                    <div><span class="label">Month:</span><span class="value">${today.getMonth() + 1} (December)</span></div>
+                    <div><span class="label">Date:</span><span class="value">${today.getDate()}</span></div>
+                    <div><span class="label">Timezone Offset:</span><span class="value">${today.getTimezoneOffset()} minutes</span></div>
+                </div>
+                
+                <div class="test-result ${isCorrect ? 'success' : ''}">
+                    <div style="font-weight: bold; font-size: 16px;">
+                        ${isCorrect ? '✅ TEST PASSED: Dates are correct!' : '❌ TEST FAILED: Dates are incorrect'}
+                    </div>
+                </div>
+            `;
+        }
+
+        // Run test on page load
+        window.addEventListener('DOMContentLoaded', runTest);
+    </script>
+</body>
+
+</html>

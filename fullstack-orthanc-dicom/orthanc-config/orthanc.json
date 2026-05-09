@@ -1,0 +1,122 @@
+{
+  "Name": "Orthanc DICOM Server - High Performance",
+  "StorageDirectory": "/var/lib/orthanc/db",
+  "IndexDirectory": "/var/lib/orthanc/db",
+
+  "HttpPort": 8042,
+  "DicomPort": 4242,
+  "RemoteAccessAllowed": true,
+  "AuthenticationEnabled": true,
+  "SslEnabled": false,
+  "RestApiWriteToFileSystemEnabled": true,
+
+  "RegisteredUsers": {
+    "orthanc": "orthanc",
+    "admin": "admin123",
+    "readonly": "readonly123",
+    "api": "api_secure_key_2024"
+  },
+
+  "HttpRequestTimeout": 30,
+  "HttpTimeout": 60,
+  "MaximumPduLength": 131072,
+  "MaximumStorageSize": 0,
+  "MaximumPatientCount": 0,
+
+  "LimitJobs": 10,
+  "LimitFindResults": 1000,
+  "LimitFindInstances": 1000,
+  "ConcurrentJobs": 4,
+  "StorageAccessOnFind": "Always",
+
+  "DicomModalities": {
+    "satusehat": {
+      // GANTI TIGA BARIS DI BAWAH INI
+      "AET": "DCMROUTER",
+      "Host": "dicom-router",
+      "Port": 11112,
+      "UseTls": true,
+      "Description": "Gateway DICOM SatuSehat Staging"
+    }
+  },
+
+  "PostgreSQL": {
+    "EnableIndex": true,
+    "EnableStorage": true,
+    "Host": "postgres",
+    "Port": 5432,
+    "Database": "orthanc",
+    "Username": "orthanc",
+    "Password": "0gl0Ncx8zp6PYql4JiYJAQ==",
+    "Lock": false,
+    "EnableSsl": false,
+    "MaximumConnectionRetries": 10,
+    "ConnectionRetryInterval": 5,
+    "IndexConnectionsCount": 50,
+    "TransactionMode": "ReadCommitted",
+    "EnableVerboseLogs": false
+  },
+
+  "Plugins": [
+    "/run/orthanc/plugins",
+    "/usr/share/orthanc/plugins"
+  ],
+  //"Plugins": ["/plugins"],
+  "DicomWeb": {
+    "Enable": true
+  },
+  "Gdcm": {
+    "Throttling": 4,
+    "RestrictTransferSyntaxes": [
+      "1.2.840.10008.1.2.4.90",
+      "1.2.840.10008.1.2.4.91",
+      "1.2.840.10008.1.2.4.92",
+      "1.2.840.10008.1.2.4.93"
+    ]
+  },
+  "OrthancExplorer2": {
+    "Enable": true,
+    "IsDefaultOrthancUI": true
+  },
+  "Worklists": {
+    "Enable": true,
+    "Database": "/worklists",
+    "FilterIssuerAet": false
+  },
+  "LuaScripts": ["/lua/hooks.lua"],
+  //"AwsS3Storage" : {
+  //  "BucketName": "aizen",
+  //  "Region" : "sin1",
+  //  "Endpoint": "https://sin1.contabostorage.com",
+  //  "AccessKey": "e76c0befdfd23381438ed642b949a7f4",
+  //  "SecretKey": "952232eca97ef0f1c7d07aadba9cb5b8",
+  //  "VirtualAddressing" : false,
+  //  "UseTransferManager" : true,
+  //  "HybridMode": "Disabled"
+  //},
+
+
+  "HttpCompressionEnabled": true,
+  "HttpsVerifyPeers": false,
+  "UserMetadata": {},
+
+  "DefaultEncoding": "Latin1",
+  "DicomScuTimeout": 10,
+  "DicomScpTimeout": 30,
+  "UnknownSopClassAccepted": false,
+
+  "JobsEngineThreadsCount": {
+    "ResourceModification": 1
+  },
+
+  "LogLevel": "default",
+  "LogFile": "/var/log/orthanc/orthanc.log",
+  "VerboseEnabled": false,
+  "TraceEnabled": false,
+
+  "StorageCompression": true,
+  "CompressionLevel": 6,
+
+  "StableAge": 60,
+  "StrictAetComparison": false
+}

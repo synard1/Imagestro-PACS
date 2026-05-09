@@ -1,0 +1,4761 @@
+"""
+Order Management Service v1.0
+SIMRS Order Simulator dengan Accession Number Generator
+Menyimpan order data untuk integrasi DICOM-SATUSEHAT
+"""
+import os
+import sys
+import uuid
+import json
+import time
+from datetime import datetime, timedelta, date, timezone
+from flask import Flask, request, jsonify, send_file
+from flask_cors import CORS
+import psycopg2
+from psycopg2 import errors
+from psycopg2.extras import RealDictCursor, Json
+from contextlib import contextmanager
+import logging
+import requests
+import jwt
+from functools import wraps
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    stream=sys.stdout
+)
+logger = logging.getLogger(__name__)
+
+app = Flask(__name__)
+CORS(app)
+
+# Configuration
+DB_CONFIG = {
+    'host': os.getenv('POSTGRES_HOST', 'postgres'),
+    'database': os.getenv('POSTGRES_DB', 'worklist_db'),
+    'user': os.getenv('POSTGRES_USER', 'dicom'),
+    'password': os.getenv('POSTGRES_PASSWORD', 'dicom123'),
+    'port': 5432
+}
+
+# Storage root for uploaded order files (inside order-management container)
+ORDER_FILES_STORAGE_ROOT = os.getenv('ORDER_FILES_STORAGE_ROOT', '/var/lib/orders/files')
+
+def _get_int_env(name, default):
+    value = os.getenv(name)
+    if value is None or value == "":
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        logger.warning(f"Invalid integer for {name}: {value!r}. Falling back to {default}.")
+        return default
+
+def _get_float_env(name, default):
+    value = os.getenv(name)
+    if value is None or value == "":
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        logger.warning(f"Invalid float for {name}: {value!r}. Falling back to {default}.")
+        return default
+
+DB_CONNECT_MAX_RETRIES = max(1, _get_int_env('DB_CONNECT_MAX_RETRIES', 5))
+DB_CONNECT_RETRY_BASE_DELAY = max(0.5, _get_float_env('DB_CONNECT_RETRY_BASE_DELAY', 2.0))
+DB_CONNECT_RETRY_MAX_DELAY = max(DB_CONNECT_RETRY_BASE_DELAY, _get_float_env('DB_CONNECT_RETRY_MAX_DELAY', 10.0))
+DB_INIT_MAX_RETRIES = max(DB_CONNECT_MAX_RETRIES, _get_int_env('DB_INIT_MAX_RETRIES', 10))
+
+# External services
+SATUSEHAT_BASE_URL = os.getenv('SATUSEHAT_BASE_URL', 'https://api-satusehat-stg.dto.kemkes.go.id')
+SATUSEHAT_CLIENT_ID = os.getenv('SATUSEHAT_CLIENT_ID', '')
+SATUSEHAT_CLIENT_SECRET = os.getenv('SATUSEHAT_CLIENT_SECRET', '')
+SATUSEHAT_ORG_ID = os.getenv('SATUSEHAT_ORGANIZATION_ID', '100000001')
+MWL_SERVICE_URL = os.getenv('MWL_SERVICE_URL', 'http://mwl-writer:8000')
+ACCESSION_API_URL = os.getenv('ACCESSION_API_URL', 'http://accession-api:8180')
+# Order number configuration
+ORDER_NUMBER_PREFIX = os.getenv('ORDER_NUMBER_PREFIX', 'ORD')
+ORDER_NUMBER_RESET = os.getenv('ORDER_NUMBER_RESET', 'daily').lower()  # 'daily' or 'monthly'
+ORDER_NUMBER_PAD_LENGTH = int(os.getenv('ORDER_NUMBER_PAD_LENGTH', '5'))
+ACCESSION_BACKFILL_PREFIX = os.getenv('ACCESSION_BACKFILL_PREFIX', 'ACC')
+ACCESSION_BACKFILL_PAD_LENGTH = int(os.getenv('ACCESSION_BACKFILL_PAD_LENGTH', '6'))
+# Duplication control configuration
+DUPLICATE_CHECK_WINDOW_HOURS = int(os.getenv("DUPLICATE_CHECK_WINDOW_HOURS", "24"))
+AUTO_CANCEL_ENABLED = os.getenv("AUTO_CANCEL_ENABLED", "true").lower() in ("1", "true", "yes", "on")
+DUPLICATE_STRICT_MODE = os.getenv("DUPLICATE_STRICT_MODE", "false").lower() in ("1", "true", "yes", "on")
+DUPLICATE_DATE_MATCH_MODE = os.getenv("DUPLICATE_DATE_MATCH_MODE", "same_day")  # same_day, exact_scheduled, flexible
+MWL_STATION_AET = os.getenv('MWL_STATION_AET', 'SCANNER01')
+# Tambahan konfigurasi SATUSEHAT (FHIR + OAuth + referensi)
+SATUSEHAT_FHIR_BASE = f"{SATUSEHAT_BASE_URL}/fhir-r4/v1"
+SATUSEHAT_OAUTH_URL = f"{SATUSEHAT_BASE_URL}/oauth2/v1/accesstoken"
+SATUSEHAT_REQUESTER_REF = os.getenv('SATUSEHAT_REQUESTER_REF')  # contoh: Practitioner/N10000001
+SATUSEHAT_PERFORMER_REF = os.getenv('SATUSEHAT_PERFORMER_REF')  # contoh: Organization/10000004
+ACSN_SYSTEM_BASE = os.getenv('ACSN_SYSTEM_BASE', 'http://sys-ids.kemkes.go.id/accessionno')
+SATUSEHAT_SYNC_OPTIONAL = os.getenv('SATUSEHAT_SYNC_OPTIONAL', 'true').lower() in ('1', 'true', 'yes', 'on')
+
+ORDERS_ORG_ID_ACCEPTS_TEXT = True
+ORDERS_ORG_ID_IS_UUID = False
+_CACHED_DEFAULT_ORG_UUID = None
+_PATIENTS_TABLE_AVAILABLE = None
+_PATIENTS_ORG_COLUMN_STATE = None
+_ALLOWED_GENDERS = {'male', 'female'}
+
+# JWT Configuration for Order Management Service
+JWT_SECRET = os.getenv('JWT_SECRET', 'change-this-secret-key-in-production') # Use a strong secret in production
+JWT_ALGORITHM = 'HS256'
+
+# Permission definitions for Order Management Service
+REQUIRED_PERMISSIONS_OM = { # Renamed to avoid conflict
+    'complete_flow': ['order:create', '*'],
+    'create_order': ['order:create', '*'],
+    'sync_satusehat': ['order:sync', '*'],
+    'create_worklist': ['worklist:create', '*']
+}
+
+# Helper untuk SATUSEHAT
+
+def now_utc_fhir():
+    t = datetime.now(timezone.utc) - timedelta(seconds=60)
+    return t.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def summarize_operation_outcome(js):
+    try:
+        if not isinstance(js, dict) or js.get('resourceType') != 'OperationOutcome':
+            return None
+        msgs = []
+        for i in js.get('issue', []):
+            det = (i.get('details') or {})
+            msg = det.get('text') or i.get('diagnostics') or i.get('code')
+            if msg:
+                msgs.append(str(msg))
+        return " | ".join(msgs) if msgs else None
+    except Exception:
+        return None
+
+
+def utc_now_iso():
+    """Return current UTC timestamp in ISO format with Z suffix."""
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def ensure_audit_structure(details, created_at=None):
+    """Ensure audit metadata dict has created/updated/deleted keys with proper structure."""
+    # Handle non-dict details (bool, None, string, etc.)
+    if not isinstance(details, dict):
+        logger.warning(f"ensure_audit_structure received non-dict details: type={type(details)}, value={details}")
+        details = {}
+
+    base = details if isinstance(details, dict) else {}
+    result = dict(base)
+
+    # Safely get existing_created
+    created_field = base.get('created') if isinstance(base, dict) else None
+    existing_created = created_field if isinstance(created_field, dict) else {}
+
+    if not isinstance(result.get('created'), dict):
+        if isinstance(created_at, datetime):
+            created_at_iso = created_at.replace(microsecond=0).isoformat() + "Z"
+        else:
+            created_at_iso = existing_created.get('at') or utc_now_iso()
+        result['created'] = {
+            'by': existing_created.get('by'),
+            'at': created_at_iso
+        }
+    if result.get('updated') is not None and not isinstance(result.get('updated'), dict):
+        result['updated'] = None
+    if result.get('deleted') is not None and not isinstance(result.get('deleted'), dict):
+        result['deleted'] = None
+    if 'updated' not in result:
+        result['updated'] = None
+    if 'deleted' not in result:
+        result['deleted'] = None
+    return result
+
+
+def get_satusehat_token():
+    if not SATUSEHAT_CLIENT_ID or not SATUSEHAT_CLIENT_SECRET:
+        raise Exception("SATUSEHAT_CLIENT_ID/CLIENT_SECRET belum di-set.")
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    params = {"grant_type": "client_credentials"}
+    data = {"client_id": SATUSEHAT_CLIENT_ID, "client_secret": SATUSEHAT_CLIENT_SECRET}
+    resp = requests.post(SATUSEHAT_OAUTH_URL, params=params, headers=headers, data=data, timeout=30)
+    resp.raise_for_status()
+    j = resp.json()
+    return j.get('access_token')
+
+def verify_token(token):
+    """Verify JWT token and return payload"""
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        return payload
+    except jwt.ExpiredSignatureError:
+        logger.warning("Token expired")
+        return None
+    except jwt.InvalidTokenError as e:
+        logger.warning(f"Invalid token: {str(e)}")
+        logger.debug(f"JWT_SECRET length: {len(JWT_SECRET) if JWT_SECRET else 0}, JWT_ALGORITHM: {JWT_ALGORITHM}")
+        return None
+
+
+def decode_token_claims(token):
+    """Decode JWT claims without signature verification (for audit/telemetry only)."""
+    if not token:
+        return None
+    try:
+        return jwt.decode(
+            token,
+            options={
+                "verify_signature": False,
+                "verify_aud": False,
+                "verify_iss": False,
+                "verify_exp": False,
+            },
+            algorithms=[JWT_ALGORITHM]
+        )
+    except Exception as exc:
+        logger.warning(f"Unable to decode token for audit context: {exc}")
+        return None
+
+def resolve_request_actor():
+    """Derive actor information from headers or JWT token."""
+    header_user_id = (
+        request.headers.get('X-User-ID')
+        or request.headers.get('X-Actor-ID')
+        or request.headers.get('X-UserId')
+    )
+    header_username = (
+        request.headers.get('X-User-Name')
+        or request.headers.get('X-Username')
+        or request.headers.get('X-UserName')
+    )
+
+    token_payload = None
+    auth_header = request.headers.get('Authorization', '')
+    token = None
+    if auth_header and auth_header.startswith('Bearer '):
+        token = auth_header.split(' ', 1)[1].strip()
+    if token:
+        verified_payload = verify_token(token)
+        token_payload = verified_payload if isinstance(verified_payload, dict) else None
+        token_verified = bool(token_payload)
+
+        if not token_payload:
+            decoded_claims = decode_token_claims(token)
+            token_payload = decoded_claims if isinstance(decoded_claims, dict) else None
+            if token_payload:
+                token_verified = False
+                logger.warning("Using unverified JWT claims for audit context; signature verification failed.")
+
+        # Only access token_payload.get() if it's actually a dict
+        if token_payload and isinstance(token_payload, dict):
+            header_user_id = header_user_id or token_payload.get('user_id') or token_payload.get('sub')
+            header_username = header_username or token_payload.get('username') or token_payload.get('email')
+            if token_verified:
+                try:
+                    request.current_user = token_payload  # cache for downstream handlers
+                except Exception:
+                    pass
+        else:
+            if token:
+                logger.warning(f"Token payload is not a dict: type={type(token_payload)}, value={token_payload}")
+    else:
+        token_payload = None
+        token_verified = False
+
+    preferred_identifier = header_username or header_user_id
+    identifier = preferred_identifier or request.headers.get('X-Request-ID') or 'system'
+
+    return {
+        'claims': token_payload,
+        'id': header_user_id,
+        'username': header_username,
+        'identifier': identifier,
+        'verified': token_verified,
+        'raw_token': token
+    }
+
+def _normalize_string(value):
+    if value is None:
+        return None
+    if isinstance(value, str):
+        cleaned = value.strip()
+        return cleaned or None
+    return str(value)
+
+def _patients_table_exists(cursor):
+    global _PATIENTS_TABLE_AVAILABLE, _PATIENTS_ORG_COLUMN_STATE
+    if _PATIENTS_TABLE_AVAILABLE is not None:
+        return _PATIENTS_TABLE_AVAILABLE
+    try:
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.tables
+                WHERE table_schema = 'public' AND table_name = 'patients'
+            )
+        """)
+        exists = bool(cursor.fetchone()[0])
+    except Exception as exc:
+        logger.error(f"Unable to verify patients table: {exc}")
+        exists = False
+    _PATIENTS_TABLE_AVAILABLE = exists
+    if not exists:
+        _PATIENTS_ORG_COLUMN_STATE = None
+        logger.error("Table 'patients' not found. Please run master-data migrations.")
+    return exists
+
+def _get_patients_org_state(cursor, refresh=False):
+    """Inspect patients.org_id column metadata and cache the result."""
+    global _PATIENTS_ORG_COLUMN_STATE
+    if not refresh and _PATIENTS_ORG_COLUMN_STATE is not None:
+        return _PATIENTS_ORG_COLUMN_STATE
+
+    state = {
+        'exists': False,
+        'accepts_text': True,
+        'is_uuid': False,
+        'not_null': False,
+        'data_type': None,
+    }
+    try:
+        cursor.execute("""
+            SELECT data_type, is_nullable
+            FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'patients' AND column_name = 'org_id'
+        """)
+        row = cursor.fetchone()
+        if row:
+            data_type, is_nullable = row
+            dtype_lower = data_type.lower() if isinstance(data_type, str) else None
+            state['exists'] = True
+            state['data_type'] = dtype_lower or data_type
+            state['not_null'] = str(is_nullable).strip().lower() == 'no'
+            if dtype_lower == 'uuid':
+                state['is_uuid'] = True
+                state['accepts_text'] = False
+            elif dtype_lower and ('char' in dtype_lower or 'text' in dtype_lower):
+                state['accepts_text'] = True
+            else:
+                state['accepts_text'] = False
+            if refresh or _PATIENTS_ORG_COLUMN_STATE is None:
+                logger.info(
+                    "patients.org_id column detected as %s (nullable=%s)",
+                    data_type,
+                    'NO' if state['not_null'] else 'YES'
+                )
+        elif refresh or _PATIENTS_ORG_COLUMN_STATE is None:
+            logger.info("patients.org_id column not found; proceeding without organization linkage.")
+    except Exception as exc:
+        logger.warning(f"Unable to inspect patients.org_id column: {exc}")
+
+    _PATIENTS_ORG_COLUMN_STATE = state
+    return state
+
+def resolve_default_org_uuid(cursor):
+    """Resolve default SATUSEHAT organization UUID from satusehat_orgs."""
+    global _CACHED_DEFAULT_ORG_UUID
+    if _CACHED_DEFAULT_ORG_UUID:
+        return _CACHED_DEFAULT_ORG_UUID
+
+    try:
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = 'public' AND table_name = 'satusehat_orgs'
+            )
+        """)
+        table_exists = cursor.fetchone()[0]
+        if not table_exists:
+            logger.error("Table satusehat_orgs not found; cannot resolve default org_id.")
+            return None
+    except Exception as exc:
+        logger.error(f"Unable to check satusehat_orgs existence: {exc}")
+        return None
+
+    env_raw = SATUSEHAT_ORG_ID.strip() if isinstance(SATUSEHAT_ORG_ID, str) else None
+    # Attempt direct UUID match first
+    if env_raw:
+        try:
+            declared_uuid = str(uuid.UUID(env_raw))
+            cursor.execute("SELECT id FROM satusehat_orgs WHERE id = %s LIMIT 1", (declared_uuid,))
+            row = cursor.fetchone()
+            if row and row[0]:
+                _CACHED_DEFAULT_ORG_UUID = str(row[0])
+                logger.info("Using SATUSEHAT_ORG_ID as satusehat_orgs.id: %s", _CACHED_DEFAULT_ORG_UUID)
+                return _CACHED_DEFAULT_ORG_UUID
+        except ValueError:
+            declared_uuid = None
+        except Exception as exc:
+            logger.warning(f"Failed to resolve SATUSEHAT_ORG_ID as UUID: {exc}")
+
+        # Attempt lookup by satusehat_org_id column
+        try:
+            cursor.execute("SELECT id FROM satusehat_orgs WHERE satusehat_org_id = %s LIMIT 1", (env_raw,))
+            row = cursor.fetchone()
+            if row and row[0]:
+                _CACHED_DEFAULT_ORG_UUID = str(row[0])
+                logger.info(
+                    "Resolved SATUSEHAT_ORG_ID '%s' to satusehat_orgs.id %s",
+                    env_raw,
+                    _CACHED_DEFAULT_ORG_UUID
+                )
+                return _CACHED_DEFAULT_ORG_UUID
+        except Exception as exc:
+            logger.warning(f"Failed to resolve SATUSEHAT_ORG_ID via satusehat_org_id column: {exc}")
+
+    # Fallback to first available organization
+    try:
+        cursor.execute("SELECT id FROM satusehat_orgs ORDER BY created_at NULLS FIRST LIMIT 1")
+    except Exception:
+        cursor.execute("SELECT id FROM satusehat_orgs LIMIT 1")
+    row = cursor.fetchone()
+    if row and row[0]:
+        _CACHED_DEFAULT_ORG_UUID = str(row[0])
+        logger.info("Defaulting orders.org_id to first satusehat_orgs.id: %s", _CACHED_DEFAULT_ORG_UUID)
+        return _CACHED_DEFAULT_ORG_UUID
+
+    logger.error("satusehat_orgs table is empty; cannot resolve default org_id.")
+    return None
+
+def resolve_order_source(data=None):
+    """
+    Determine the source of the order for monitoring purposes.
+
+    Priority:
+    1. Explicit body["order_source"]
+    2. Header "X-Order-Source"
+    3. Heuristics (SIMRS / PACS / API / INTERNAL)
+    """
+    # 1) Explicit from body
+    if isinstance(data, dict):
+        src = _normalize_string(data.get("order_source"))
+        if src:
+            return src.lower()
+
+    # 2) Header override
+    header_src = _normalize_string(request.headers.get("X-Order-Source"))
+    if header_src:
+        return header_src.lower()
+
+    # 3) Simple heuristics
+    ua = (request.headers.get("User-Agent") or "").lower()
+    if "simrs" in ua or request.headers.get("X-SIMRS-Client"):
+        return "simrs"
+    if "pacs" in ua:
+        return "pacs"
+    if "router" in ua or "dicom" in ua:
+        return "pacs"
+
+    # Fallbacks based on path
+    path = (request.path or "").lower()
+    if "complete-flow" in path:
+        return "api"
+    if "orders/create" in path:
+        return "api"
+
+    return "api"
+
+
+def ensure_patient_record(cursor, data, org_uuid=None):
+    """Ensure a patient record exists (creating or updating) and return its UUID."""
+    if not _patients_table_exists(cursor):
+        raise RuntimeError("Master patient registry table 'patients' is not available.")
+
+    patients_org_state = _get_patients_org_state(cursor)
+    normalized_org_value = None
+    if patients_org_state.get('exists'):
+        candidate_org = org_uuid
+        if candidate_org is None:
+            for candidate_field in ('org_id', 'org_uuid', 'organization_id', 'satusehat_org_id'):
+                candidate_org = data.get(candidate_field)
+                if candidate_org:
+                    break
+        candidate_org = _normalize_string(candidate_org)
+        if candidate_org:
+            if patients_org_state.get('is_uuid'):
+                try:
+                    normalized_org_value = str(uuid.UUID(candidate_org))
+                except ValueError:
+                    logger.warning(
+                        "Ignoring invalid organization identifier for patients.org_id: %s",
+                        candidate_org
+                    )
+                    normalized_org_value = None
+            elif patients_org_state.get('accepts_text'):
+                normalized_org_value = candidate_org
+        if normalized_org_value is None and patients_org_state.get('is_uuid'):
+            normalized_org_value = resolve_default_org_uuid(cursor)
+
+    patient_national_id = _normalize_string(data.get('patient_national_id'))
+    medical_record_number = _normalize_string(data.get('medical_record_number'))
+    if not patient_national_id and not medical_record_number:
+        raise ValueError("patient_national_id or medical_record_number is required.")
+    if not patient_national_id:
+        patient_national_id = medical_record_number
+    if not medical_record_number:
+        medical_record_number = f"MRN-{patient_national_id}"
+
+    patient_name = _normalize_string(data.get('patient_name')) or patient_national_id
+    gender_raw = _normalize_string(data.get('gender'))
+    gender = gender_raw.lower() if gender_raw and gender_raw.lower() in _ALLOWED_GENDERS else None
+
+    birth_date_input = data.get('birth_date')
+    birth_date_value = None
+    if isinstance(birth_date_input, datetime):
+        birth_date_value = birth_date_input.date()
+    elif isinstance(birth_date_input, date):
+        birth_date_value = birth_date_input
+    elif isinstance(birth_date_input, str):
+        try:
+            birth_date_value = datetime.strptime(birth_date_input[:10], "%Y-%m-%d").date()
+        except ValueError:
+            logger.error(f"Invalid birth_date format: {birth_date_input}")
+            raise ValueError("birth_date must be in YYYY-MM-DD format.")
+    if not birth_date_value:
+        raise ValueError("birth_date is required to create patient record.")
+
+    ihs_number = _normalize_string(
+        data.get('satusehat_ihs_number')
+        or data.get('ihs_number')
+        or data.get('satusehat_patient_id')
+        or data.get('patientId')
+    )
+    address = _normalize_string(data.get('patient_address') or data.get('address'))
+    phone = _normalize_string(data.get('patient_phone') or data.get('phone'))
+    email = _normalize_string(data.get('patient_email') or data.get('email'))
+
+    # Try to find existing patient by NIK or MRN
+    cursor.execute("SELECT id, ihs_number FROM patients WHERE patient_national_id = %s LIMIT 1", (patient_national_id,))
+    row = cursor.fetchone()
+    if not row and medical_record_number:
+        cursor.execute("SELECT id, ihs_number FROM patients WHERE medical_record_number = %s LIMIT 1", (medical_record_number,))
+        row = cursor.fetchone()
+
+    if row:
+        patient_id, existing_ihs = str(row[0]), row[1]
+        try:
+            update_clauses = [
+                "medical_record_number = COALESCE(%s, medical_record_number)",
+                "patient_name = COALESCE(%s, patient_name)",
+                "gender = COALESCE(%s, gender)",
+                "birth_date = COALESCE(%s, birth_date)",
+                "ihs_number = COALESCE(%s, ihs_number)",
+                "address = COALESCE(%s, address)",
+                "phone = COALESCE(%s, phone)",
+                "email = COALESCE(%s, email)",
+                "updated_at = CURRENT_TIMESTAMP"
+            ]
+            params = [
+                medical_record_number,
+                patient_name,
+                gender,
+                birth_date_value,
+                ihs_number if ihs_number else existing_ihs,
+                address,
+                phone,
+                email
+            ]
+            if patients_org_state.get('exists'):
+                update_clauses.insert(0, "org_id = COALESCE(%s, org_id)")
+                params.insert(0, normalized_org_value)
+            cursor.execute(
+                f"""
+                UPDATE patients
+                SET {", ".join(update_clauses)}
+                WHERE id = %s
+                """,
+                (*params, patient_id)
+            )
+        except Exception as exc:
+            logger.warning(f"Failed to refresh patient record {patient_id}: {exc}")
+        return patient_id
+
+    patient_uuid = str(uuid.uuid4())
+    insert_columns = [
+        "id",
+        "patient_national_id",
+        "ihs_number",
+        "medical_record_number",
+        "patient_name",
+        "gender",
+        "birth_date",
+        "address",
+        "phone",
+        "email"
+    ]
+    insert_values = [
+        patient_uuid,
+        patient_national_id,
+        ihs_number,
+        medical_record_number,
+        patient_name,
+        gender,
+        birth_date_value,
+        address,
+        phone,
+        email
+    ]
+    if patients_org_state.get('exists'):
+        insert_columns.insert(1, "org_id")
+        insert_values.insert(1, normalized_org_value)
+
+    placeholders = ["%s"] * len(insert_columns)
+    cursor.execute(
+        f"""
+        INSERT INTO patients (
+            {", ".join(insert_columns)},
+            created_at,
+            updated_at
+        ) VALUES (
+            {", ".join(placeholders)},
+            CURRENT_TIMESTAMP,
+            CURRENT_TIMESTAMP
+        )
+        RETURNING id
+        """,
+        tuple(insert_values)
+    )
+    result = cursor.fetchone()
+    return str(result[0]) if result else patient_uuid
+
+def require_auth(required_permissions=[]):
+    """Decorator to require authentication and check permissions"""
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            auth_header = request.headers.get('Authorization')
+
+            if not auth_header or not auth_header.startswith('Bearer '):
+                return jsonify({
+                    "status": "error",
+                    "message": "Missing or invalid authorization header"
+                }), 401
+
+            token = auth_header.split(' ')[1]
+            user = verify_token(token)
+
+            if not user:
+                logger.warning("Authentication failed: Invalid or expired token")
+                return jsonify({
+                    "status": "error",
+                    "message": "Authentication failed: Invalid or expired token. Please check your credentials and try again."
+                }), 401
+
+            # Check permissions if required
+            if required_permissions:
+                user_permissions = user.get('permissions', [])
+
+                # Admin has all permissions
+                if '*' in user_permissions:
+                    request.current_user = user
+                    return f(*args, **kwargs)
+
+                # Check if user has any of the required permissions
+                has_permission = any(perm in user_permissions for perm in required_permissions)
+
+                if not has_permission:
+                    # log_audit(None, None, 'PERMISSION_DENIED', None, None, user) # No audit log in OM for now
+                    return jsonify({
+                        "status": "error",
+                        "message": "Permission denied",
+                        "required": required_permissions,
+                        "user_permissions": user_permissions
+                    }), 403
+
+            # Attach user info to request
+            request.current_user = user
+            return f(*args, **kwargs)
+
+        return decorated_function
+    return decorator
+
+def _connect_with_retry(max_attempts=None, base_delay=None, max_delay=None):
+    attempts = max_attempts or DB_CONNECT_MAX_RETRIES
+    if attempts < 1:
+        attempts = 1
+    delay = DB_CONNECT_RETRY_BASE_DELAY if base_delay is None else max(0.0, base_delay)
+    delay_cap = DB_CONNECT_RETRY_MAX_DELAY if max_delay is None else max(delay, max_delay)
+    last_error = None
+
+    for attempt in range(1, attempts + 1):
+        try:
+            conn = psycopg2.connect(**DB_CONFIG)
+            if attempt > 1:
+                logger.info("Database connection established on attempt %d", attempt)
+            return conn
+        except Exception as exc:
+            last_error = exc
+            if attempt >= attempts:
+                break
+            sleep_seconds = min(delay * attempt, delay_cap) if delay > 0 else 0
+            logger.warning(
+                "Database connection attempt %d/%d failed: %s. Retrying in %.1fs",
+                attempt,
+                attempts,
+                exc,
+                sleep_seconds
+            )
+            if sleep_seconds > 0:
+                time.sleep(sleep_seconds)
+    raise last_error
+
+
+def wait_for_database(max_attempts=None):
+    attempts = max_attempts or DB_INIT_MAX_RETRIES
+    try:
+        conn = _connect_with_retry(max_attempts=attempts)
+    except Exception as exc:
+        logger.critical(
+            "Database not ready after %d attempt(s). Last error: %s",
+            attempts,
+            exc
+        )
+        raise RuntimeError("Database is not ready") from exc
+    else:
+        conn.close()
+        logger.info("Database connectivity verified successfully.")
+
+
+@contextmanager
+def get_db_connection(max_attempts=None):
+    conn = None
+    try:
+        conn = _connect_with_retry(max_attempts=max_attempts)
+        yield conn
+        conn.commit()
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        logger.error(f"Database error: {str(e)}")
+        raise
+    finally:
+        if conn:
+            conn.close()
+
+
+def log_order_action(order_id, order_number, accession_number, action, previous_status=None, payload=None, user_id='system', ip=None):
+    """Write a simple audit log for order actions to /var/log/orders/audit.log"""
+    try:
+        record = {
+            'timestamp': datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            'order_id': str(order_id) if order_id else None,
+            'order_number': order_number,
+            'accession_number': accession_number,
+            'action': action,
+            'previous_status': previous_status,
+            'payload': payload,
+            'user_id': user_id,
+            'ip': ip
+        }
+        os.makedirs('/var/log/orders', exist_ok=True)
+        with open('/var/log/orders/audit.log', 'a', encoding='utf-8') as f:
+            f.write(json.dumps(record) + '\n')
+    except Exception as e:
+        logger.warning(f"Audit log write failed: {str(e)}")
+
+
+# -----------------------------------------------------------------------------
+# LIFECYCLE STATUS HELPERS
+# -----------------------------------------------------------------------------
+
+COMPLETED_STATUSES = {'COMPLETED', 'FINISHED', 'DONE'}
+CANCELED_STATUSES = {'CANCELED', 'CANCELLED', 'VOID', 'DELETED'}
+
+
+def is_completed_status(status: str) -> bool:
+    """Return True if status represents a completed order."""
+    if not status:
+        return False
+    return status.strip().upper() in COMPLETED_STATUSES
+
+
+def is_canceled_status(status: str) -> bool:
+    """Return True if status represents a canceled/void/deleted order."""
+    if not status:
+        return False
+    return status.strip().upper() in CANCELED_STATUSES
+
+def generate_order_number():
+    """
+    Generate order number berdasarkan konfigurasi di database.
+
+    Urutan prioritas:
+    1) settings / system_config.key = 'order_number_config' (JSON)
+    2) Fallback ke env ORDER_NUMBER_* (compat lama)
+    3) Fallback terakhir: sequence / timestamp
+
+    Struktur order_number_config yang didukung (contoh):
+    {
+      "pattern": "ORD{YYYY}{MM}{DD}{NNNNN}",
+      "sequence_digits": 5,
+      "counter_reset_policy": "DAILY",   // DAILY|MONTHLY|YEARLY|NONE
+      "org_code": "HOSP1"                // optional, {ORG}
+    }
+    """
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+
+            # 1) Ambil config dari settings atau system_config
+            config = None
+
+            # Prefer tabel settings jika ada
+            try:
+                cursor.execute("""
+                    SELECT value
+                    FROM settings
+                    WHERE key = 'order_number_config'
+                    ORDER BY updated_at DESC NULLS LAST
+                    LIMIT 1
+                """)
+                row = cursor.fetchone()
+                if row:
+                    raw = row[0]
+                    if isinstance(raw, str):
+                        try:
+                            config = json.loads(raw)
+                        except Exception:
+                            config = None
+                    elif isinstance(raw, dict):
+                        config = raw
+            except Exception as _:
+                # Abaikan jika tabel/settings belum ada, lanjut cek system_config
+                config = None
+
+            # Backward compatibility: cek system_config jika belum dapat
+            if config is None:
+                try:
+                    cursor.execute("""
+                        SELECT config_value
+                        FROM system_config
+                        WHERE config_key = 'order_number_config'
+                          AND status = 'active'
+                        LIMIT 1
+                    """)
+                    row = cursor.fetchone()
+                    if row:
+                        raw = row[0]
+                        if isinstance(raw, str):
+                            try:
+                                config = json.loads(raw)
+                            except Exception:
+                                config = None
+                        elif isinstance(raw, dict):
+                            config = raw
+                except Exception:
+                    config = None
+
+            # 2) Jika config valid, gunakan sepenuhnya
+            if isinstance(config, dict):
+                pattern = config.get('pattern') or 'ORD{YYYY}{MM}{DD}{NNNNN}'
+                sequence_digits = int(config.get('sequence_digits', 5))
+                counter_reset_policy = (config.get('counter_reset_policy') or 'DAILY').upper()
+                org_code = str(config.get('org_code') or '')
+
+                now = datetime.now()
+
+                # Date components
+                year_full = now.strftime('%Y')
+                year_short = now.strftime('%y')
+                month_2 = now.strftime('%m')
+                day_2 = now.strftime('%d')
+
+                # Scope & period key untuk counter
+                if counter_reset_policy == 'DAILY':
+                    scope = 'daily'
+                    period_key = now.strftime('%Y%m%d')
+                elif counter_reset_policy == 'MONTHLY':
+                    scope = 'monthly'
+                    period_key = now.strftime('%Y%m')
+                elif counter_reset_policy == 'YEARLY':
+                    scope = 'yearly'
+                    period_key = now.strftime('%Y')
+                else:  # 'NONE' atau nilai lain -> global counter tanpa reset
+                    scope = 'global'
+                    period_key = 'global'
+
+                # Ambil / increment counter
+                cursor.execute(
+                    """
+                    INSERT INTO order_counters(scope, period_key, counter, updated_at)
+                    VALUES (%s, %s, 1, CURRENT_TIMESTAMP)
+                    ON CONFLICT (scope, period_key)
+                    DO UPDATE SET counter = order_counters.counter + 1,
+                                  updated_at = CURRENT_TIMESTAMP
+                    RETURNING counter
+                    """,
+                    (scope, period_key),
+                )
+                next_val = cursor.fetchone()[0]
+                seq_str = str(next_val).zfill(sequence_digits)
+
+                # Bangun order_number dari pattern:
+                # dukung placeholder umum:
+                # {YYYY}, {YY}, {MM}, {DD}, {NN}, {SEQ}, {NNNNN}, {ORG}
+                order_number = pattern
+                order_number = order_number.replace('{YYYY}', year_full)
+                order_number = order_number.replace('{YY}', year_short)
+                order_number = order_number.replace('{MM}', month_2)
+                order_number = order_number.replace('{DD}', day_2)
+                order_number = order_number.replace('{ORG}', org_code)
+                # {SEQ} atau placeholder numerik umum diarahkan ke seq_str
+                order_number = order_number.replace('{SEQ}', seq_str)
+                order_number = order_number.replace('{NNNNN}', seq_str)
+                order_number = order_number.replace('{NN}', seq_str)
+
+                return order_number
+
+            # 3) Fallback ke logic lama (env-based)
+            reset = ORDER_NUMBER_RESET if ORDER_NUMBER_RESET in ('daily', 'monthly') else 'daily'
+            now = datetime.now()
+            date_part = now.strftime('%Y%m%d') if reset == 'daily' else now.strftime('%Y%m')
+            scope = reset
+            period_key = date_part
+
+            cursor.execute(
+                """
+                INSERT INTO order_counters(scope, period_key, counter, updated_at)
+                VALUES (%s, %s, 1, CURRENT_TIMESTAMP)
+                ON CONFLICT (scope, period_key)
+                DO UPDATE SET counter = order_counters.counter + 1,
+                              updated_at = CURRENT_TIMESTAMP
+                RETURNING counter
+                """,
+                (scope, period_key),
+            )
+            next_val = cursor.fetchone()[0]
+            return f"{ORDER_NUMBER_PREFIX}{date_part}{str(next_val).zfill(ORDER_NUMBER_PAD_LENGTH)}"
+
+    except Exception as e:
+        logger.warning(f"Failed to generate order number from database config: {e}")
+        # 4) Fallback darurat: gunakan sequence atau timestamp
+        try:
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT nextval('order_number_seq')")
+                seq_val = cursor.fetchone()[0]
+                now = datetime.now()
+                date_part = now.strftime('%Y%m%d')
+                return f"{ORDER_NUMBER_PREFIX}{date_part}{str(seq_val).zfill(ORDER_NUMBER_PAD_LENGTH)}"
+        except Exception:
+            now = datetime.now()
+            timestamp = now.strftime('%Y%m%d%H%M%S')
+            return f"{ORDER_NUMBER_PREFIX}{timestamp}"
+
+def init_database():
+    """Initialize order management tables and align to unified schema"""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            try:
+                cursor.execute('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"')
+            except Exception as ext_err:
+                logger.warning(f"Skipping uuid-ossp extension setup: {ext_err}")
+
+            # Align patients.org_id constraints so legacy nulls do not break inserts
+            patients_exists = False
+            try:
+                cursor.execute("""
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM information_schema.tables
+                        WHERE table_schema = 'public' AND table_name = 'patients'
+                    )
+                """)
+                patients_exists = bool(cursor.fetchone()[0])
+            except Exception as patients_check_err:
+                logger.warning(f"Unable to verify patients table during initialization: {patients_check_err}")
+
+            if patients_exists:
+                patients_org_state = _get_patients_org_state(cursor, refresh=True)
+                if patients_org_state.get('exists') and patients_org_state.get('not_null'):
+                    try:
+                        cursor.execute("ALTER TABLE patients ALTER COLUMN org_id DROP NOT NULL")
+                        patients_org_state = _get_patients_org_state(cursor, refresh=True)
+                        logger.info("Relaxed patients.org_id constraint to allow NULL values.")
+                    except Exception as drop_err:
+                        logger.warning(f"Unable to relax patients.org_id constraint: {drop_err}")
+            else:
+                logger.warning("patients table not found during initialization; patient linkage features may be limited.")
+
+            # Ensure orders table exists
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS orders (
+                    id UUID PRIMARY KEY,
+                    patient_id UUID,
+                    order_number VARCHAR(50) UNIQUE NOT NULL,
+                    accession_number VARCHAR(50) UNIQUE,
+                    modality VARCHAR(10),
+                    procedure_code VARCHAR(50),
+                    procedure_name VARCHAR(200),
+                    referring_doctor VARCHAR(200),
+                    attending_nurse VARCHAR(200),
+                    scheduled_at TIMESTAMPTZ,
+                    patient_national_id VARCHAR(16),
+                    patient_name VARCHAR(200),
+                    gender VARCHAR(10),
+                    birth_date DATE,
+                    medical_record_number VARCHAR(50),
+                    satusehat_ihs_number VARCHAR(64),
+                    registration_number VARCHAR(50),
+                    status VARCHAR(20) DEFAULT 'CREATED',
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ DEFAULT now(),
+                    details JSONB NOT NULL DEFAULT jsonb_build_object(
+                        'created', jsonb_build_object('by', NULL, 'at', now()),
+                        'updated', NULL,
+                        'deleted', NULL
+                    )
+                )
+            """)
+
+            # Add canonical columns to existing orders table if missing or update constraints
+            # Add org_id if missing
+            cursor.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS org_id VARCHAR(50)")
+
+            # Ensure order_number exists and is enforced without breaking legacy data
+            cursor.execute("""
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_name = 'orders' AND column_name = 'order_number'
+            """)
+            if cursor.fetchone() is None:
+                cursor.execute("ALTER TABLE orders ADD COLUMN order_number VARCHAR(50)")
+
+            # Backfill missing order numbers with deterministic values
+            cursor.execute("""
+                WITH ranked AS (
+                    SELECT
+                        id,
+                        COALESCE(created_at, CURRENT_TIMESTAMP) AS created_ts,
+                        ROW_NUMBER() OVER (
+                            ORDER BY COALESCE(created_at, CURRENT_TIMESTAMP), id::text
+                        ) AS rn
+                    FROM orders
+                    WHERE order_number IS NULL OR order_number = ''
+                )
+                UPDATE orders o
+                SET order_number = CONCAT(
+                    %s,
+                    TO_CHAR(r.created_ts, 'YYYYMMDD'),
+                    LPAD(r.rn::text, %s, '0')
+                )
+                FROM ranked r
+                WHERE o.id = r.id
+            """, (ORDER_NUMBER_PREFIX, ORDER_NUMBER_PAD_LENGTH))
+
+            cursor.execute("SELECT COUNT(*) FROM orders WHERE order_number IS NULL OR order_number = ''")
+            if cursor.fetchone()[0] == 0:
+                cursor.execute("ALTER TABLE orders ALTER COLUMN order_number SET NOT NULL")
+            else:
+                logger.warning("Detected orders without order_number; NOT NULL enforcement skipped.")
+
+            cursor.execute("""
+                SELECT COUNT(*) FROM (
+                    SELECT order_number
+                    FROM orders
+                    WHERE order_number IS NOT NULL AND order_number <> ''
+                    GROUP BY order_number
+                    HAVING COUNT(*) > 1
+                ) duplicates
+            """)
+            if cursor.fetchone()[0] == 0:
+                cursor.execute("""
+                    SELECT 1
+                    FROM pg_constraint
+                    WHERE conrelid = 'orders'::regclass
+                      AND contype = 'u'
+                      AND conname = 'orders_order_number_key'
+                """)
+                if cursor.fetchone() is None:
+                    cursor.execute("ALTER TABLE orders ADD CONSTRAINT orders_order_number_key UNIQUE (order_number)")
+            else:
+                logger.warning("order_number duplicates found; unique constraint not applied.")
+
+            # Normalize legacy column names to the unified schema
+            cursor.execute("""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = 'orders'
+            """)
+            existing_columns = {row[0] for row in cursor.fetchall()}
+
+            cursor.execute("""
+                SELECT data_type
+                FROM information_schema.columns
+                WHERE table_name = 'orders' AND column_name = 'org_id'
+            """)
+            org_type_row = cursor.fetchone()
+            normalized_org_type = org_type_row[0].lower() if org_type_row and org_type_row[0] else None
+            global ORDERS_ORG_ID_ACCEPTS_TEXT, ORDERS_ORG_ID_IS_UUID
+            ORDERS_ORG_ID_ACCEPTS_TEXT = True
+            ORDERS_ORG_ID_IS_UUID = False
+            if normalized_org_type:
+                if 'char' in normalized_org_type or 'text' in normalized_org_type:
+                    ORDERS_ORG_ID_ACCEPTS_TEXT = True
+                elif normalized_org_type == 'uuid':
+                    ORDERS_ORG_ID_ACCEPTS_TEXT = False
+                    ORDERS_ORG_ID_IS_UUID = True
+                else:
+                    ORDERS_ORG_ID_ACCEPTS_TEXT = False
+                logger.info(
+                    "orders.org_id column detected as %s; accepts_text=%s, is_uuid=%s",
+                    normalized_org_type,
+                    ORDERS_ORG_ID_ACCEPTS_TEXT,
+                    ORDERS_ORG_ID_IS_UUID
+                )
+            else:
+                logger.info("orders.org_id column type detection returned no result; defaulting to text-compatible.")
+
+            def refresh_columns():
+                cursor.execute("""
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_name = 'orders'
+                """)
+                return {row[0] for row in cursor.fetchall()}
+
+            def has_column(name):
+                return name in existing_columns
+
+            default_org_uuid = resolve_default_org_uuid(cursor)
+            if default_org_uuid:
+                target_value = default_org_uuid if ORDERS_ORG_ID_IS_UUID else str(default_org_uuid)
+                try:
+                    cursor.execute("UPDATE orders SET org_id = %s WHERE org_id IS NULL", (target_value,))
+                except Exception as exc:
+                    logger.warning(f"Failed to backfill orders.org_id with default organization: {exc}")
+            else:
+                logger.warning("No default organization UUID resolved; existing orders may lack org_id.")
+
+            if has_column('ihs_number') and not has_column('satusehat_ihs_number'):
+                cursor.execute("ALTER TABLE orders RENAME COLUMN ihs_number TO satusehat_ihs_number")
+                existing_columns = refresh_columns()
+
+            if has_column('requesting_physician') and not has_column('ordering_physician_name'):
+                cursor.execute("ALTER TABLE orders RENAME COLUMN requesting_physician TO ordering_physician_name")
+                existing_columns = refresh_columns()
+
+            if has_column('patient_nik'):
+                if not has_column('patient_national_id'):
+                    cursor.execute("ALTER TABLE orders RENAME COLUMN patient_nik TO patient_national_id")
+                    existing_columns = refresh_columns()
+                else:
+                    cursor.execute("""
+                        UPDATE orders
+                        SET patient_national_id = COALESCE(patient_national_id, patient_nik)
+                        WHERE patient_national_id IS NULL AND patient_nik IS NOT NULL
+                    """)
+
+            if has_column('accession_no') and not has_column('accession_number'):
+                cursor.execute("ALTER TABLE orders RENAME COLUMN accession_no TO accession_number")
+                existing_columns = refresh_columns()
+
+            if has_column('requested_procedure') and not has_column('procedure_name'):
+                cursor.execute("ALTER TABLE orders RENAME COLUMN requested_procedure TO procedure_name")
+                existing_columns = refresh_columns()
+
+            if has_column('station_ae_title') and not has_column('ordering_station_aet'):
+                cursor.execute("ALTER TABLE orders RENAME COLUMN station_ae_title TO ordering_station_aet")
+                existing_columns = refresh_columns()
+
+            if has_column('satusehat_patient_id'):
+                if not has_column('satusehat_ihs_number'):
+                    cursor.execute("ALTER TABLE orders RENAME COLUMN satusehat_patient_id TO satusehat_ihs_number")
+                    existing_columns = refresh_columns()
+                else:
+                    cursor.execute("""
+                        UPDATE orders
+                        SET satusehat_ihs_number = COALESCE(satusehat_ihs_number, satusehat_patient_id)
+                        WHERE satusehat_ihs_number IS NULL AND satusehat_patient_id IS NOT NULL
+                    """)
+                    cursor.execute("ALTER TABLE orders DROP COLUMN satusehat_patient_id")
+                    existing_columns = refresh_columns()
+
+            # Ensure all expected columns exist for the unified schema
+            # NOTE: new robust lifecycle columns:
+            #   - completed_at, completed_by
+            #   - cancel_at, cancel_by
+            # so we can audit completion/cancellation explicitly.
+            required_columns = [
+                ("org_id", "VARCHAR(50)"),
+                ("patient_id", "UUID"),
+                ("order_source", "VARCHAR(50)"),
+                ("accession_number", "VARCHAR(50)"),
+                ("modality", "VARCHAR(10)"),
+                ("procedure_code", "VARCHAR(50)"),
+                ("procedure_name", "VARCHAR(200)"),
+                ("referring_doctor", "VARCHAR(200)"),
+                ("attending_nurse", "VARCHAR(200)"),  # Add attending_nurse column after referring_doctor
+                ("procedure_description", "TEXT"),
+                ("scheduled_at", "TIMESTAMPTZ"),
+                ("patient_national_id", "VARCHAR(16)"),
+                ("patient_name", "VARCHAR(200)"),
+                ("gender", "VARCHAR(10)"),
+                ("birth_date", "DATE"),
+                ("patient_phone", "VARCHAR(20)"),
+                ("patient_address", "TEXT"),
+                ("medical_record_number", "VARCHAR(50)"),
+                ("satusehat_ihs_number", "VARCHAR(64)"),
+                ("registration_number", "VARCHAR(50)"),
+                ("status", "VARCHAR(20) DEFAULT 'CREATED'"),
+                ("order_status", "VARCHAR(50) DEFAULT 'CREATED'"),
+                ("worklist_status", "VARCHAR(50)"),
+                ("imaging_status", "VARCHAR(50)"),
+                ("clinical_indication", "TEXT"),
+                ("clinical_notes", "TEXT"),
+                ("ordering_physician_name", "VARCHAR(200)"),
+                ("performing_physician_name", "VARCHAR(200)"),
+                ("ordering_station_aet", "VARCHAR(64)"),
+                ("satusehat_encounter_id", "VARCHAR(100)"),
+                ("satusehat_service_request_id", "VARCHAR(100)"),
+                ("satusehat_synced", "BOOLEAN DEFAULT FALSE"),
+                ("satusehat_sync_date", "TIMESTAMPTZ"),
+                # Robust lifecycle audit fields
+                ("completed_at", "TIMESTAMPTZ"),
+                ("completed_by", "TEXT"),
+                ("cancel_at", "TIMESTAMPTZ"),
+                ("cancel_by", "TEXT"),
+                ("created_at", "TIMESTAMPTZ DEFAULT now()"),
+                ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
+                ("details", "JSONB NOT NULL DEFAULT jsonb_build_object('created', jsonb_build_object('by', NULL, 'at', now()), 'updated', NULL, 'deleted', NULL)")
+            ]
+            for column_name, definition in required_columns:
+                cursor.execute(f"ALTER TABLE orders ADD COLUMN IF NOT EXISTS {column_name} {definition}")
+
+            # Future-proof: Ensure attending_nurse column exists with proper definition
+            cursor.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS attending_nurse VARCHAR(200)")
+
+            try:
+                cursor.execute("""
+                    SELECT is_nullable
+                    FROM information_schema.columns
+                    WHERE table_name = 'orders' AND column_name = 'ordering_station_aet'
+                """)
+                nullable_row = cursor.fetchone()
+                if nullable_row and str(nullable_row[0]).strip().lower() == 'no':
+                    cursor.execute("ALTER TABLE orders ALTER COLUMN ordering_station_aet DROP NOT NULL")
+                    logger.info("Relaxed orders.ordering_station_aet constraint to allow NULL values.")
+            except Exception as ordering_aet_err:
+                logger.warning(f"Unable to adjust orders.ordering_station_aet nullability: {ordering_aet_err}")
+
+            # Align defaults and backfill NULLs for key status timestamps
+            cursor.execute("ALTER TABLE orders ALTER COLUMN status SET DEFAULT 'CREATED'")
+            cursor.execute("ALTER TABLE orders ALTER COLUMN order_status SET DEFAULT 'CREATED'")
+            cursor.execute("ALTER TABLE orders ALTER COLUMN created_at SET DEFAULT now()")
+            cursor.execute("ALTER TABLE orders ALTER COLUMN updated_at SET DEFAULT now()")
+            cursor.execute("""
+                UPDATE orders
+                SET status = 'CREATED'
+                WHERE status IS NULL
+            """)
+            cursor.execute("""
+                UPDATE orders
+                SET order_status = COALESCE(order_status, status, 'CREATED')
+                WHERE order_status IS NULL
+            """)
+            cursor.execute("""
+                UPDATE orders
+                SET created_at = COALESCE(created_at, now()),
+                    updated_at = COALESCE(updated_at, created_at)
+            """)
+
+            cursor.execute("""
+                ALTER TABLE orders
+                ALTER COLUMN details SET DEFAULT jsonb_build_object(
+                    'created', jsonb_build_object('by', NULL, 'at', now()),
+                    'updated', NULL,
+                    'deleted', NULL
+                )
+            """)
+
+            cursor.execute("""
+                UPDATE orders
+                SET details = jsonb_build_object(
+                    'created', jsonb_build_object(
+                        'by', COALESCE((details -> 'created' ->> 'by')::text, NULL),
+                        'at', COALESCE((details -> 'created' ->> 'at')::timestamptz, created_at)
+                    ),
+                    'updated', details -> 'updated',
+                    'deleted', details -> 'deleted'
+                )
+                WHERE details IS NULL
+            """)
+
+            cursor.execute("""
+                UPDATE orders
+                SET satusehat_synced = COALESCE(satusehat_synced, FALSE)
+            """)
+
+            # Backfill accession numbers when missing and re-apply unique constraint safely
+            cursor.execute("""
+                WITH ranked AS (
+                    SELECT
+                        id,
+                        COALESCE(created_at, CURRENT_TIMESTAMP) AS created_ts,
+                        ROW_NUMBER() OVER (
+                            ORDER BY COALESCE(created_at, CURRENT_TIMESTAMP), id::text
+                        ) AS rn
+                    FROM orders
+                    WHERE accession_number IS NULL OR accession_number = ''
+                )
+                UPDATE orders o
+                SET accession_number = CONCAT(
+                    %s,
+                    TO_CHAR(r.created_ts, 'YYYYMMDD'),
+                    LPAD(r.rn::text, %s, '0')
+                )
+                FROM ranked r
+                WHERE o.id = r.id
+            """, (ACCESSION_BACKFILL_PREFIX, ACCESSION_BACKFILL_PAD_LENGTH))
+            cursor.execute("""
+                SELECT COUNT(*) FROM (
+                    SELECT accession_number
+                    FROM orders
+                    WHERE accession_number IS NOT NULL AND accession_number <> ''
+                    GROUP BY accession_number
+                    HAVING COUNT(*) > 1
+                ) duplicates
+            """)
+            accession_dup = cursor.fetchone()[0]
+            if accession_dup == 0:
+                cursor.execute("""
+                    SELECT 1
+                    FROM pg_constraint
+                    WHERE conrelid = 'orders'::regclass
+                      AND contype = 'u'
+                      AND conname = 'orders_accession_number_key'
+                """)
+                if cursor.fetchone() is None:
+                    cursor.execute("ALTER TABLE orders ADD CONSTRAINT orders_accession_number_key UNIQUE (accession_number)")
+            else:
+                logger.warning("accession_number duplicates found; unique constraint not applied.")
+
+            # Indexes
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_orders_patient_national_id ON orders(patient_national_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_orders_registration_number ON orders(registration_number)")
+
+            # Counter table for sequence-based order numbers
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS order_counters (
+                    scope VARCHAR(20) NOT NULL,
+                    period_key VARCHAR(8) NOT NULL,
+                    counter INTEGER NOT NULL DEFAULT 0,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    PRIMARY KEY (scope, period_key)
+                )
+                """
+            )
+
+            # System configuration table for order number settings
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS system_config (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    config_key VARCHAR(100) NOT NULL UNIQUE,
+                    config_value JSONB NOT NULL,
+                    status VARCHAR(20) DEFAULT 'active',
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ DEFAULT now()
+                )
+                """
+            )
+
+            # Create index for system_config
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_system_config_key ON system_config(config_key)"
+            )
+
+            # Insert default order number configuration if not exists
+            cursor.execute(
+                """
+                INSERT INTO system_config (config_key, config_value, status)
+                VALUES (%s, %s, 'active')
+                ON CONFLICT (config_key) DO NOTHING
+                """,
+                (
+                    'order_number_config',
+                    Json({
+                        'prefix': ORDER_NUMBER_PREFIX,
+                        'reset': ORDER_NUMBER_RESET,
+                        'pad_length': ORDER_NUMBER_PAD_LENGTH,
+                        'separator': '',
+                        'description': 'Order number generation configuration'
+                    })
+                )
+            )
+
+            # -----------------------------------------------------------------------------
+            # Files attached to orders (non-destructive, aligned with SATUSEHAT schema)
+            # -----------------------------------------------------------------------------
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS order_files (
+                    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    order_id        UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+                    accession_number VARCHAR(50),
+                    filename        TEXT NOT NULL,
+                    file_type       TEXT NOT NULL,
+                    category        TEXT NOT NULL DEFAULT 'other',
+                    size_bytes      BIGINT,
+                    storage_path    TEXT,
+                    checksum_sha256 TEXT,
+                    metadata        JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    created_by      TEXT,
+                    source          TEXT
+                )
+                """
+            )
+
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_order_files_order_id ON order_files(order_id)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_order_files_accession ON order_files(accession_number)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_order_files_category ON order_files(category)"
+            )
+
+            logger.info("Order management database aligned to unified schema (including order_files)")
+            try:
+                dict_cursor = conn.cursor(cursor_factory=RealDictCursor)
+                dict_cursor.execute("""
+                    SELECT
+                        id,
+                        org_id,
+                        patient_national_id,
+                        medical_record_number,
+                        patient_name,
+                        gender,
+                        birth_date,
+                        satusehat_ihs_number
+                    FROM orders
+                    WHERE patient_id IS NULL
+                """)
+                missing_patient_rows = dict_cursor.fetchall()
+                if missing_patient_rows:
+                    logger.info("Backfilling patient references for %d orders", len(missing_patient_rows))
+                    patient_cache = {}
+                    for row in missing_patient_rows:
+                        cache_key = row.get('patient_national_id') or row.get('medical_record_number')
+                        patient_uuid = patient_cache.get(cache_key)
+                        if not patient_uuid:
+                            try:
+                                patient_uuid = ensure_patient_record(cursor, row, org_uuid=row.get('org_id'))
+                                if cache_key:
+                                    patient_cache[cache_key] = patient_uuid
+                            except Exception as backfill_err:
+                                logger.warning(
+                                    "Unable to backfill patient for order %s: %s",
+                                    row.get('id'),
+                                    backfill_err
+                                )
+                                continue
+                        try:
+                            cursor.execute(
+                                "UPDATE orders SET patient_id = %s WHERE id = %s",
+                                (patient_uuid, str(row.get('id')))
+                            )
+                        except Exception as update_err:
+                            logger.warning(
+                                "Failed to update order %s with patient_id: %s",
+                                row.get('id'),
+                                update_err
+                            )
+                dict_cursor.close()
+            except Exception as backfill_outer_err:
+                logger.warning(f"Patient backfill skipped due to error: {backfill_outer_err}")
+
+    except Exception as e:
+        logger.error(f"Failed to initialize database: {str(e)}")
+        raise
+
+@app.route('/orders/create_unified', methods=['POST'])
+def create_order_unified():
+    """Create order via single gate and request accession from accession-api"""
+    try:
+        data = request.get_json() or {}
+        # patient_national_id is now optional, MRN can be used instead
+        required = ['modality', 'patient_name', 'gender', 'birth_date']
+        missing = []
+        for field in required:
+            normalized_value = _normalize_string(data.get(field))
+            data[field] = normalized_value
+            if normalized_value is None:
+                missing.append(field)
+
+        referring_doctor = _normalize_string(
+            data.get('referring_doctor') or data.get('referring_physician')
+        )
+        if not referring_doctor:
+            missing.append('referring_doctor')
+        else:
+            data['referring_doctor'] = referring_doctor
+
+        # Normalize key identifiers used for deduplication
+        dedupe_keys = (
+            'registration_number',
+            'procedure_code',
+            'procedure_name',
+            'patient_name',
+            'medical_record_number'
+        )
+        dedupe_values = {}
+        for key in dedupe_keys:
+            normalized = _normalize_string(data.get(key))
+            data[key] = normalized
+            dedupe_values[key] = normalized
+        dedupe_check_enabled = all(dedupe_values.values())
+
+        if missing:
+            return jsonify({'status':'error','message': f"Missing required fields: {', '.join(missing)}"}), 400
+
+        # At least one identifier (NIK or MRN) must be provided
+        if not data.get('patient_national_id') and not data.get('medical_record_number'):
+            return jsonify({
+                'status': 'error',
+                'message': 'Either patient_national_id or medical_record_number must be provided'
+            }), 400
+        satusehat_ihs_number = (
+            data.get('satusehat_ihs_number')
+            or data.get('ihs_number')
+            or data.get('satusehat_patient_id')
+            or data.get('patientId')
+        )
+        # Debug logging for accession_number handling
+        logger.info(f"[DEBUG] Raw accession_number from request: {data.get('accession_number')}")
+        logger.info(f"[DEBUG] Raw accession_no from request: {data.get('accession_no')}")
+        provided_accession = _normalize_string(data.get('accession_number') or data.get('accession_no'))
+        logger.info(f"[DEBUG] After _normalize_string: {provided_accession}")
+        accession_number = provided_accession
+        accession_generated = False
+        if accession_number:
+            logger.info("Using accession_number supplied by client: %s", accession_number)
+        else:
+            acc_url = f"{ACCESSION_API_URL}/accession/create"
+            acc_payload = {
+                'modality': data['modality'],
+                'procedure_code': data.get('procedure_code'),
+                'procedure_name': data.get('procedure_name'),
+                'scheduled_at': data.get('scheduled_at'),
+                'patient_national_id': data['patient_national_id'],
+                'patient_name': data['patient_name'],
+                'gender': data['gender'],
+                'birth_date': data['birth_date'],
+                'medical_record_number': data.get('medical_record_number'),
+                'ihs_number': satusehat_ihs_number,
+                'registration_number': data.get('registration_number')
+            }
+            if satusehat_ihs_number:
+                acc_payload['satusehat_ihs_number'] = satusehat_ihs_number
+            try:
+                resp = requests.post(acc_url, json=acc_payload, timeout=15)
+            except requests.RequestException as e:
+                logger.error(f"Accession API unreachable: {e!s}")
+                return jsonify({ 'status': 'error', 'message': 'Cannot reach accession-api' }), 502
+            if resp.status_code >= 300:
+                logger.error(f"Accession API {resp.status_code}: {resp.text[:300]}")
+                return jsonify({ 'status': 'error', 'message': f"Accession API {resp.status_code}" }), 502
+            try:
+                acc_json = resp.json()
+            except Exception:
+                logger.error(f"Accession API non-JSON: {resp.text[:300]}")
+                return jsonify({ 'status': 'error', 'message': 'Accession API returned non-JSON' }), 502
+            accession_number = acc_json.get('accession_number')
+            if not accession_number:
+                logger.error(f"Missing accession_number in response: {acc_json}")
+                return jsonify({ 'status': 'error', 'message': 'Accession number missing from accession-api response' }), 502
+            accession_generated = True
+
+        satusehat_encounter_id = data.get('satusehat_encounter_id') or data.get('encounterId')
+        # Determine source of this order for monitoring (simrs/api/pacs/etc)
+        order_source = resolve_order_source(data)
+        order_id = uuid.uuid4()
+        order_number = generate_order_number()
+        actor_info = resolve_request_actor()
+        actor_claims = actor_info.get('claims') or {}
+        actor_user_id = actor_info.get('id') or actor_claims.get('user_id') or actor_claims.get('sub')
+        actor_username = actor_info.get('username') or actor_claims.get('username') or actor_claims.get('email')
+        actor_identifier = actor_info.get('identifier')
+        actor_display = actor_username or actor_user_id or actor_identifier or 'system'
+        created_iso = utc_now_iso()
+        created_meta = {'by': actor_display, 'at': created_iso}
+        if actor_user_id:
+            created_meta['user_id'] = actor_user_id
+        if actor_username:
+            created_meta['username'] = actor_username
+        details_payload = ensure_audit_structure({
+            'created': created_meta,
+            'updated': None,
+            'deleted': None
+        })
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+
+            # Enhanced duplicate validation based on examination, patient, and date
+            if dedupe_check_enabled:
+                # Build date matching condition based on configuration
+                date_condition = ""
+                date_params = []
+                
+                if DUPLICATE_DATE_MATCH_MODE == "exact_scheduled":
+                    # Only match if scheduled_at dates are exactly the same
+                    date_condition = """
+                        AND scheduled_at IS NOT NULL 
+                        AND DATE(scheduled_at) = CURRENT_DATE
+                        AND created_at >= (CURRENT_TIMESTAMP - INTERVAL %s HOUR)
+                    """
+                    date_params = [DUPLICATE_CHECK_WINDOW_HOURS]
+                elif DUPLICATE_DATE_MATCH_MODE == "flexible":
+                    # Match either scheduled_at or created_at within window
+                    date_condition = """
+                        AND (
+                          (scheduled_at IS NOT NULL AND DATE(scheduled_at) = CURRENT_DATE
+                           AND created_at >= (CURRENT_TIMESTAMP - INTERVAL %s HOUR))
+                          OR (scheduled_at IS NULL AND created_at >= (CURRENT_TIMESTAMP - INTERVAL %s HOUR))
+                        )
+                    """
+                    date_params = [DUPLICATE_CHECK_WINDOW_HOURS, DUPLICATE_CHECK_WINDOW_HOURS]
+                else:  # same_day (default)
+                    # Match current date for scheduled_at, or created_at within window
+                    date_condition = """
+                        AND (
+                          (scheduled_at IS NOT NULL AND DATE(scheduled_at) = CURRENT_DATE)
+                          OR (scheduled_at IS NULL AND created_at >= (CURRENT_TIMESTAMP - INTERVAL %s HOUR))
+                        )
+                    """
+                    date_params = [DUPLICATE_CHECK_WINDOW_HOURS]
+                
+                # Build patient matching condition based on strict mode
+                patient_condition = ""
+                patient_params = []
+                
+                patient_nik = _normalize_string(data.get('patient_national_id'))
+                patient_mrn = _normalize_string(data.get('medical_record_number'))
+                
+                if DUPLICATE_STRICT_MODE and patient_nik and patient_mrn:
+                    # Both NIK and MRN must match
+                    patient_condition = """
+                        COALESCE(patient_national_id, '') = %s 
+                        AND COALESCE(medical_record_number, '') = %s
+                    """
+                    patient_params = [patient_nik, patient_mrn]
+                elif patient_nik and patient_mrn:
+                    # Either NIK or MRN can match (more flexible)
+                    patient_condition = """
+                        (COALESCE(patient_national_id, '') = %s OR COALESCE(medical_record_number, '') = %s)
+                    """
+                    patient_params = [patient_nik, patient_mrn]
+                elif patient_nik:
+                    # Only NIK provided
+                    patient_condition = "COALESCE(patient_national_id, '') = %s"
+                    patient_params = [patient_nik]
+                elif patient_mrn:
+                    # Only MRN provided
+                    patient_condition = "COALESCE(medical_record_number, '') = %s"
+                    patient_params = [patient_mrn]
+                else:
+                    # No patient identifier provided, skip duplicate check
+                    patient_condition = "FALSE"
+                
+                # Only check for duplicates if we have patient condition
+                if patient_condition != "FALSE":
+                    # Prepare all parameters in correct order
+                    query_params = []
+                    
+                    # Add patient parameters
+                    query_params.extend(patient_params)
+                    
+                    # Add modality parameter
+                    modality_val = _normalize_string(data.get('modality'))
+                    query_params.append(modality_val)
+                    
+                    # Add procedure parameters
+                    proc_code_val = _normalize_string(data.get('procedure_code'))
+                    proc_name_val = _normalize_string(data.get('procedure_name'))
+                    query_params.append(proc_code_val)
+                    query_params.append(proc_name_val)
+                    
+                    # Add date parameters
+                    query_params.extend(date_params)
+                    
+                    # Build the complete WHERE clause
+                    where_clause = f"""
+                        COALESCE(status, '') NOT IN ('DELETED', 'CANCELED', 'CANCELLED', 'VOID')
+                        AND ({patient_condition})
+                        AND COALESCE(modality, '') = %s
+                        AND (
+                          (COALESCE(procedure_code, '') <> '' AND COALESCE(procedure_code, '') = %s)
+                          OR (COALESCE(procedure_code, '') = '' AND COALESCE(procedure_name, '') = %s)
+                        )
+                        {date_condition}
+                    """
+                    
+                    cursor.execute(f"""
+                        SELECT id, order_number, accession_number, status, patient_national_id,
+                               medical_record_number, modality, procedure_code, procedure_name,
+                               scheduled_at, created_at, details
+                        FROM orders
+                        WHERE {where_clause}
+                        ORDER BY created_at DESC
+                        LIMIT 5
+                        """,
+                        query_params
+                    )
+                    duplicates = cursor.fetchall()
+                else:
+                    # No patient condition, no duplicates to check
+                    duplicates = []
+                duplicates = cursor.fetchall()
+                
+                if duplicates:
+                    duplicate_info = []
+                    auto_canceled = []
+                    
+                    for dup in duplicates:
+                        dup_info = {
+                            'id': str(dup['id']),
+                            'order_number': dup['order_number'],
+                            'accession_number': dup['accession_number'],
+                            'status': dup['status'],
+                            'created_at': dup['created_at'].isoformat() if dup['created_at'] else None
+                        }
+                        duplicate_info.append(dup_info)
+                        
+                        # Auto-cancel existing duplicates if enabled
+                        if AUTO_CANCEL_ENABLED:
+                            try:
+                                actor_info = resolve_request_actor()
+                                actor_id = (actor_info.get('id') or actor_info.get('username') or 'system')
+                                
+                                # Update details with deletion info
+                                dup_details = ensure_audit_structure(dup.get('details'), dup.get('created_at'))
+                                dup_details['deleted'] = {
+                                    'by': actor_id,
+                                    'at': utc_now_iso(),
+                                    'reason': 'AUTO_CANCEL_DUPLICATE_SAME_DAY'
+                                }
+                                
+                                cursor.execute(
+                                    """
+                                    UPDATE orders
+                                    SET status = 'DELETED',
+                                        cancel_at = CURRENT_TIMESTAMP,
+                                        cancel_by = %s,
+                                        details = %s,
+                                        updated_at = CURRENT_TIMESTAMP
+                                    WHERE id = %s
+                                    """,
+                                    (actor_id, Json(dup_details), str(dup['id']))
+                                )
+                                
+                                auto_canceled.append(str(dup['id']))
+                                
+                                # Log the auto-cancel action
+                                log_order_action(
+                                    dup['id'],
+                                    dup['order_number'],
+                                    dup['accession_number'],
+                                    'ORDER_AUTO_DELETED_DUPLICATE_SAME_DAY',
+                                    {"previous_status": dup['status']},
+                                    {
+                                        "reason": "AUTO_CANCEL_DUPLICATE_SAME_DAY",
+                                        "new_order_candidate": str(order_id)
+                                    },
+                                    actor_id,
+                                    request.remote_addr
+                                )
+                                
+                            except Exception as e:
+                                logger.error(f"Failed to auto-cancel duplicate order {dup['id']}: {e}")
+                    
+                    logger.warning(
+                        "Duplicate orders detected and auto-canceled: %s",
+                        auto_canceled if auto_canceled else "none"
+                    )
+                    
+                    return jsonify({
+                        'status': 'error',
+                        'message': 'Duplicate order detected for the same patient, examination, and date',
+                        'duplicate_orders': duplicate_info,
+                        'auto_canceled': auto_canceled,
+                        'action_required': 'Please review the canceled orders or proceed with creating a new order'
+                    }), 409
+
+            org_uuid = resolve_default_org_uuid(cursor)
+            if not org_uuid:
+                logger.error("Cannot resolve default organization UUID for new order insertion.")
+                return jsonify({
+                    'status': 'error',
+                    'message': 'No SATUSEHAT organization configured; cannot assign org_id.'
+                }), 500
+            try:
+                patient_uuid = ensure_patient_record(cursor, data, org_uuid=org_uuid)
+            except ValueError as patient_err:
+                logger.error(f"Patient validation failed: {patient_err}")
+                return jsonify({'status': 'error', 'message': str(patient_err)}), 400
+            except Exception as patient_err:
+                logger.error(f"Failed to ensure patient record: {patient_err}")
+                return jsonify({'status': 'error', 'message': 'Failed to prepare patient record'}), 500
+
+            # Skip the old duplicate detection since we already handled it above
+            # The enhanced duplicate detection above already handles auto-cancel
+            auto_canceled = []
+
+            org_id_value = org_uuid if ORDERS_ORG_ID_IS_UUID else str(org_uuid)
+            sql = """
+                INSERT INTO orders (
+                    id,
+                    org_id,
+                    patient_id,
+                    order_number,
+                    accession_number,
+                    modality,
+                    procedure_code,
+                    procedure_name,
+                    referring_doctor,
+                    attending_nurse,
+                    scheduled_at,
+                    patient_national_id,
+                    patient_name,
+                    gender,
+                    birth_date,
+                    medical_record_number,
+                    satusehat_ihs_number,
+                    registration_number,
+                    status,
+                    satusehat_encounter_id,
+                    order_source,
+                    details
+                ) VALUES (
+                    %s,  -- id
+                    %s,  -- org_id
+                    %s,  -- patient_id
+                    %s,  -- order_number
+                    %s,  -- accession_number
+                    %s,  -- modality
+                    %s,  -- procedure_code
+                    %s,  -- procedure_name
+                    %s,  -- referring_doctor
+                    %s,  -- attending_nurse
+                    %s,  -- scheduled_at
+                    %s,  -- patient_national_id
+                    %s,  -- patient_name
+                    %s,  -- gender
+                    %s,  -- birth_date
+                    %s,  -- medical_record_number
+                    %s,  -- satusehat_ihs_number
+                    %s,  -- registration_number
+                    'CREATED',
+                    %s,  -- satusehat_encounter_id
+                    %s,  -- order_source
+                    %s   -- details
+                )
+            """
+            params = (
+                str(order_id),
+                org_id_value,
+                patient_uuid,
+                order_number,
+                accession_number,
+                data.get('modality'),
+                data.get('procedure_code'),
+                data.get('procedure_name'),
+                referring_doctor,
+                data.get('attending_nurse'),
+                data.get('scheduled_at'),
+                data.get('patient_national_id'),
+                data.get('patient_name'),
+                data.get('gender'),
+                data.get('birth_date'),
+                data.get('medical_record_number'),
+                satusehat_ihs_number,
+                data.get('registration_number'),
+                satusehat_encounter_id,
+                order_source,
+                Json(details_payload),
+            )
+            try:
+                cursor.execute(sql, params)
+            except errors.UniqueViolation as conflict_err:
+                conn.rollback()
+                logger.warning("Duplicate order constraint for accession/order number: %s", conflict_err)
+                conflict_field = 'accession_number' if accession_number else 'order_number'
+                message = f"{conflict_field} already exists."
+                return jsonify({'status': 'error', 'message': message}), 409
+            # Log action
+            log_order_action(
+                order_id, order_number, accession_number, 'ORDER_CREATED',
+                None, data,
+                actor_user_id or actor_username or actor_display,
+                request.remote_addr
+            )
+        return jsonify({
+            'status': 'success',
+            'order': {
+                'id': str(order_id),
+                'order_number': order_number,
+                'accession_number': accession_number,
+                'modality': data.get('modality'),
+                'procedure_code': data.get('procedure_code'),
+                'procedure_name': data.get('procedure_name'),
+                'scheduled_at': data.get('scheduled_at'),
+                'patient_national_id': data.get('patient_national_id'),
+                'patient_name': data.get('patient_name'),
+                'gender': data.get('gender'),
+                'birth_date': data.get('birth_date'),
+                'medical_record_number': data.get('medical_record_number'),
+                'satusehat_ihs_number': satusehat_ihs_number,
+                'registration_number': data.get('registration_number'),
+                'referring_doctor': referring_doctor,
+                'patient_id': patient_uuid,
+                'satusehat_encounter_id': satusehat_encounter_id,
+                'attending_nurse': data.get('attending_nurse'),
+                'order_source': order_source,
+                'details': details_payload,
+                'status': 'CREATED'
+            }
+        }), 201
+    except Exception as e:
+        logger.error(f"Error creating order: {str(e)}")
+        return jsonify({ 'status': 'error', 'message': str(e) }), 500
+
+@app.route('/orders/create', methods=['POST'])
+def create_order():
+    # Wrapper to use unified implementation
+    return create_order_unified()
+
+@app.route('/', methods=['GET'])
+def index():
+    return jsonify({
+        "service": "Order Management Service",
+        "version": "1.0",
+        "description": "SIMRS Order Simulator with Accession Number Generator & Duplicate Detection",
+        "features": [
+            "Auto Accession Number generation",
+            "Order data persistence",
+            "SATUSEHAT integration",
+            "MWL Worklist creation",
+            "Complete flow automation",
+            "Order files upload/download (DICOM, docs, etc.)",
+            "Duplicate order detection & auto-cancel",
+            "Enhanced filtering & reporting"
+        ],
+        "status": "running",
+        "endpoints": {
+            "service_info": "GET /",
+            "health_check": "GET /health",
+            "create_order": "POST /orders/create",
+            "list_orders": "GET /orders/list",
+            "get_order": "GET /orders/<id>",
+            "update_order": "PUT /orders/<id>",
+            "delete_order": "DELETE /orders/<id>",
+            "purge_order": "DELETE /orders/<id>/purge",
+            "sync_satusehat": "POST /orders/<id>/sync-satusehat",
+            "create_worklist": "POST /orders/<id>/create-worklist",
+            "complete_flow": "POST /orders/complete-flow",
+            "order_files": {
+                "list": "GET /orders/<id>/files",
+                "upload": "POST /orders/<id>/files",
+                "delete": "DELETE /orders/<id>/files/<file_id>",
+                "download": "GET /orders/<id>/files/<file_id>/content"
+            },
+            "duplicate_management": {
+                "list_duplicates": "GET /orders/duplicates",
+                "auto_cancel_duplicates": "POST /orders/duplicates/auto-cancel"
+            },
+            "statistics": {
+                "source_stats": "GET /orders/source-stats",
+                "satusehat_stats": "GET /orders/satusehat-stats",
+                "source_status_stats": "GET /orders/source-status-stats",
+                "satusehat_not_synced": "GET /orders/satusehat-not-synced"
+            }
+        },
+        "duplicate_detection": {
+            "enabled": AUTO_CANCEL_ENABLED,
+            "check_window_hours": DUPLICATE_CHECK_WINDOW_HOURS,
+            "criteria": [
+                "Same patient (NIK or MRN)",
+                "Same examination (modality + procedure)",
+                "Same date (scheduled_at or created_at)"
+            ],
+            "auto_cancel_behavior": "Soft delete existing duplicates when creating new order"
+        }
+    }), 200
+
+@app.route('/health', methods=['GET'])
+def health():
+    db_status = "unknown"
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1")
+            db_status = "healthy"
+    except:
+        db_status = "unhealthy"
+    
+    return jsonify({
+        "status": "healthy",
+        "service": "order-management",
+        "database": db_status,
+        "timestamp": datetime.now().isoformat()
+    }), 200
+
+
+
+@app.route('/orders/source-stats', methods=['GET'])
+def source_stats():
+    """
+    Aggregated count of orders by order_source for dashboard/monitoring.
+
+    Features:
+    - Excludes orders with status = 'DELETED'.
+    - Normalizes order_source to lower-case; null/empty -> 'unknown'.
+    - Optional time filter via ?from= & ?to= based on created_at.
+    - Optional time series via ?group_by=day.
+    """
+    try:
+        # Read filters
+        from_param = request.args.get('from')
+        to_param = request.args.get('to')
+        group_by = (request.args.get('group_by') or '').lower().strip()
+
+        def parse_ts(value, is_end=False):
+            if not value:
+                return None
+            v = value.strip()
+            # If only date provided, interpret:
+            # - from: YYYY-MM-DDT00:00:00Z
+            # - to:   YYYY-MM-DDT23:59:59.999Z (implemented as next day start)
+            try:
+                if len(v) == 10 and v[4] == '-' and v[7] == '-':
+                    dt = datetime.strptime(v, "%Y-%m-%d")
+                    if is_end:
+                        return dt + timedelta(days=1)
+                    return dt
+                # Otherwise, let datetime parse ISO-like string
+                # Note: no timezone conversion; assume UTC-compatible input
+                return datetime.fromisoformat(v.replace('Z', '+00:00'))
+            except Exception:
+                return None
+
+        from_ts = parse_ts(from_param, is_end=False)
+        to_ts = parse_ts(to_param, is_end=True)
+
+        with get_db_connection() as conn:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+            # Build WHERE conditions
+            where_clauses = ["COALESCE(status, '') <> 'DELETED'"]
+            params = []
+
+            if from_ts:
+                where_clauses.append("created_at >= %s")
+                params.append(from_ts)
+            if to_ts:
+                where_clauses.append("created_at < %s")
+                params.append(to_ts)
+
+            where_sql = " AND ".join(where_clauses) if where_clauses else "TRUE"
+
+            # Time series mode
+            if group_by == 'day':
+                cursor.execute(
+                    f"""
+                    SELECT
+                        DATE(created_at) AS day,
+                        COALESCE(NULLIF(LOWER(TRIM(order_source)), ''), 'unknown') AS source,
+                        COUNT(*)::bigint AS count
+                    FROM orders
+                    WHERE {where_sql}
+                    GROUP BY DATE(created_at),
+                             COALESCE(NULLIF(LOWER(TRIM(order_source)), ''), 'unknown')
+                    ORDER BY day ASC, source ASC
+                    """,
+                    params
+                )
+                rows = cursor.fetchall()
+                if not rows:
+                    return jsonify({
+                        "status": "success",
+                        "mode": "by_day",
+                        "total": 0,
+                        "sources_summary": [],
+                        "by_day": []
+                    }), 200
+
+                # Aggregate per day
+                by_day_map = {}
+                summary_map = {}
+                for r in rows:
+                    day = r['day'].strftime("%Y-%m-%d")
+                    src = r['source']
+                    c = int(r['count'])
+
+                    # per-day
+                    d = by_day_map.setdefault(day, {"day": day, "total": 0, "sources": {}})
+                    d["total"] += c
+                    d["sources"][src] = d["sources"].get(src, 0) + c
+
+                    # global summary
+                    summary_map[src] = summary_map.get(src, 0) + c
+
+                # Build output structures
+                by_day = []
+                for day, info in sorted(by_day_map.items()):
+                    total_day = info["total"]
+                    src_list = []
+                    for src, c in sorted(info["sources"].items(), key=lambda x: -x[1]):
+                        pct = (c / total_day * 100.0) if total_day > 0 else 0.0
+                        src_list.append({
+                            "source": src,
+                            "count": c,
+                            "percentage": round(pct, 2)
+                        })
+                    by_day.append({
+                        "day": day,
+                        "total": total_day,
+                        "sources": src_list
+                    })
+
+                total_all = sum(summary_map.values())
+                sources_summary = []
+                for src, c in sorted(summary_map.items(), key=lambda x: -x[1]):
+                    pct = (c / total_all * 100.0) if total_all > 0 else 0.0
+                    sources_summary.append({
+                        "source": src,
+                        "count": c,
+                        "percentage": round(pct, 2)
+                    })
+
+                return jsonify({
+                    "status": "success",
+                    "mode": "by_day",
+                    "total": total_all,
+                    "sources_summary": sources_summary,
+                    "by_day": by_day
+                }), 200
+
+            # Default: aggregated summary mode
+            cursor.execute(
+                f"""
+                SELECT
+                    COALESCE(NULLIF(LOWER(TRIM(order_source)), ''), 'unknown') AS source,
+                    COUNT(*)::bigint AS count
+                FROM orders
+                WHERE {where_sql}
+                GROUP BY COALESCE(NULLIF(LOWER(TRIM(order_source)), ''), 'unknown')
+                ORDER BY count DESC
+                """,
+                params
+            )
+            rows = cursor.fetchall()
+
+            total = sum(int(r['count']) for r in rows) if rows else 0
+            sources = []
+            for r in rows:
+                c = int(r['count'])
+                pct = (c / total * 100.0) if total > 0 else 0.0
+                sources.append({
+                    "source": r['source'],
+                    "count": c,
+                    "percentage": round(pct, 2)
+                })
+
+            return jsonify({
+                "status": "success",
+                "mode": "summary",
+                "total": total,
+                "sources": sources
+            }), 200
+
+    except Exception as e:
+        logger.error(f"Error generating source stats: {str(e)}", exc_info=True)
+        return jsonify({
+            "status": "error",
+            "message": "Failed to compute order source stats",
+            "detail": str(e)
+        }), 500
+
+
+@app.route('/orders/satusehat-not-synced', methods=['GET'])
+def satusehat_not_synced_list():
+    """
+    List detail orders yang BELUM tersinkron ke SatuSehat (untuk follow-up).
+
+    Kriteria:
+      - status != 'DELETED'
+      - satusehat_synced = FALSE atau satusehat_synced IS NULL
+
+    Query params:
+      - from:   (opsional) created_at >=, YYYY-MM-DD atau ISO (Z didukung)
+      - to:     (opsional) created_at <, YYYY-MM-DD -> +1 hari (exclusive)
+      - modality: (opsional) filter exact modality
+      - source:   (opsional) filter exact order_source (case-insensitive)
+      - limit:    (opsional) default 50, max 500
+      - offset:   (opsional) default 0
+
+    Response:
+      {
+        "status": "success",
+        "orders": [ ... ],
+        "count": 10,
+        "total": 123,
+        "limit": 50,
+        "offset": 0
+      }
+    """
+    try:
+        from_param = request.args.get('from')
+        to_param = request.args.get('to')
+        modality = request.args.get('modality')
+        source = request.args.get('source')
+        limit = request.args.get('limit', 50, type=int)
+        offset = request.args.get('offset', 0, type=int)
+
+        # Boundaries untuk hindari abuse
+        if limit is None or limit < 1:
+            limit = 1
+        if limit > 500:
+            limit = 500
+        if offset is None or offset < 0:
+            offset = 0
+
+        def parse_ts(value, is_end=False):
+            if not value:
+                return None
+            v = value.strip()
+            try:
+                # YYYY-MM-DD
+                if len(v) == 10 and v[4] == '-' and v[7] == '-':
+                    dt = datetime.strptime(v, "%Y-%m-%d")
+                    return dt + timedelta(days=1) if is_end else dt
+                # ISO datetime (dukung Z)
+                return datetime.fromisoformat(v.replace('Z', '+00:00'))
+            except Exception:
+                return None
+
+        from_ts = parse_ts(from_param, is_end=False)
+        to_ts = parse_ts(to_param, is_end=True)
+
+        with get_db_connection() as conn:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+            where_clauses = [
+                "status != 'DELETED'",
+                "(satusehat_synced = FALSE OR satusehat_synced IS NULL)"
+            ]
+            params = []
+
+            if from_ts:
+                where_clauses.append("created_at >= %s")
+                params.append(from_ts)
+
+            if to_ts:
+                where_clauses.append("created_at < %s")
+                params.append(to_ts)
+
+            if modality:
+                where_clauses.append("modality = %s")
+                params.append(modality)
+
+            if source:
+                where_clauses.append("LOWER(COALESCE(order_source, '')) = %s")
+                params.append(source.strip().lower())
+
+            where_sql = " AND ".join(where_clauses) if where_clauses else "TRUE"
+
+            # Hitung total
+            cursor.execute(
+                f"SELECT COUNT(*) AS total FROM orders WHERE {where_sql}",
+                params
+            )
+            total = int((cursor.fetchone() or {}).get('total') or 0)
+
+            # Ambil page data
+            cursor.execute(
+                f"""
+                SELECT
+                    id,
+                    order_number,
+                    accession_number,
+                    patient_name,
+                    patient_national_id,
+                    medical_record_number,
+                    modality,
+                    procedure_code,
+                    procedure_name,
+                    registration_number,
+                    order_source,
+                    status,
+                    order_status,
+                    worklist_status,
+                    satusehat_synced,
+                    satusehat_encounter_id,
+                    satusehat_service_request_id,
+                    satusehat_sync_date,
+                    created_at
+                FROM orders
+                WHERE {where_sql}
+                ORDER BY created_at DESC
+                LIMIT %s OFFSET %s
+                """,
+                params + [limit, offset]
+            )
+            rows = cursor.fetchall() or []
+
+            # Normalisasi id ke string
+            for r in rows:
+                if r.get('id') is not None:
+                    r['id'] = str(r['id'])
+
+            return jsonify({
+                "status": "success",
+                "orders": rows,
+                "count": len(rows),
+                "total": total,
+                "limit": limit,
+                "offset": offset
+            }), 200
+
+    except Exception as e:
+        logger.error(f"Error listing SatuSehat not-synced orders: {str(e)}", exc_info=True)
+        return jsonify({
+            "status": "error",
+            "message": "Failed to list SatuSehat not-synced orders",
+            "detail": str(e)
+        }), 500
+
+
+@app.route('/orders/satusehat-stats', methods=['GET'])
+def satusehat_stats():
+    """
+    Ringkasan status integrasi SatuSehat untuk orders.
+
+    Query params (opsional):
+      - from: filter created_at >= (YYYY-MM-DD atau ISO, 'Z' didukung)
+      - to:   filter created_at < (hari berikutnya jika YYYY-MM-DD)
+      - modality: filter exact modality
+      - source:   filter exact order_source (dibandingkan lower-case)
+
+    Aturan:
+      - Hanya menghitung orders dengan status != 'DELETED'.
+      - synced:
+          satusehat_synced = TRUE
+      - not_synced:
+          satusehat_synced = FALSE atau NULL
+
+    Contoh response:
+      {
+        "status": "success",
+        "total_orders": 120,
+        "synced": 80,
+        "not_synced": 40,
+        "synced_percentage": 66.67,
+        "not_synced_percentage": 33.33,
+        "filters": {
+          "from": "2025-01-01",
+          "to": "2025-01-31",
+          "modality": "CT",
+          "source": "simrs"
+        }
+      }
+    """
+    try:
+        from_param = request.args.get('from')
+        to_param = request.args.get('to')
+        modality = request.args.get('modality')
+        source = request.args.get('source')
+
+        def parse_ts(value, is_end=False):
+            if not value:
+                return None
+            v = value.strip()
+            try:
+                # Jika hanya tanggal (YYYY-MM-DD)
+                if len(v) == 10 and v[4] == '-' and v[7] == '-':
+                    dt = datetime.strptime(v, "%Y-%m-%d")
+                    # to: pakai hari berikutnya (exclusive)
+                    return dt + timedelta(days=1) if is_end else dt
+                # ISO-like, dukung Z
+                return datetime.fromisoformat(v.replace('Z', '+00:00'))
+            except Exception:
+                return None
+
+        from_ts = parse_ts(from_param, is_end=False)
+        to_ts = parse_ts(to_param, is_end=True)
+
+        with get_db_connection() as conn:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+            where_clauses = ["status != 'DELETED'"]
+            params = []
+
+            if from_ts:
+                where_clauses.append("created_at >= %s")
+                params.append(from_ts)
+
+            if to_ts:
+                where_clauses.append("created_at < %s")
+                params.append(to_ts)
+
+            if modality:
+                where_clauses.append("modality = %s")
+                params.append(modality)
+
+            if source:
+                where_clauses.append("LOWER(COALESCE(order_source, '')) = %s")
+                params.append(source.strip().lower())
+
+            where_sql = " AND ".join(where_clauses) if where_clauses else "TRUE"
+
+            # Hitung total, synced, not_synced dalam satu query
+            cursor.execute(
+                f"""
+                SELECT
+                    COUNT(*)::bigint AS total_orders,
+                    COUNT(*) FILTER (WHERE satusehat_synced = TRUE)::bigint AS synced,
+                    COUNT(*) FILTER (WHERE satusehat_synced = FALSE OR satusehat_synced IS NULL)::bigint AS not_synced
+                FROM orders
+                WHERE {where_sql}
+                """,
+                params
+            )
+            row = cursor.fetchone() or {}
+            total = int(row.get('total_orders') or 0)
+            synced = int(row.get('synced') or 0)
+            not_synced = int(row.get('not_synced') or 0)
+
+            synced_pct = round((synced / total * 100.0), 2) if total > 0 else 0.0
+            not_synced_pct = round((not_synced / total * 100.0), 2) if total > 0 else 0.0
+
+            return jsonify({
+                "status": "success",
+                "total_orders": total,
+                "synced": synced,
+                "not_synced": not_synced,
+                "synced_percentage": synced_pct,
+                "not_synced_percentage": not_synced_pct,
+                "filters": {
+                    "from": from_param,
+                    "to": to_param,
+                    "modality": modality,
+                    "source": source
+                }
+            }), 200
+
+    except Exception as e:
+        logger.error(f"Error generating SatuSehat stats: {str(e)}", exc_info=True)
+        return jsonify({
+            "status": "error",
+            "message": "Failed to compute SatuSehat stats",
+            "detail": str(e)
+        }), 500
+
+
+@app.route('/orders/duplicates', methods=['GET'])
+def list_duplicate_orders():
+    """
+    List potential duplicate orders based on patient, examination, and date criteria.
+    
+    Query parameters:
+    - patient_national_id: Filter by patient NIK
+    - medical_record_number: Filter by MRN  
+    - modality: Filter by modality
+    - procedure_code: Filter by procedure code
+    - procedure_name: Filter by procedure name
+    - date: Filter by date (YYYY-MM-DD format)
+    - status: Filter by status (default: exclude DELETED)
+    - limit: Number of results per group (default: 5)
+    - window_hours: Lookback window in hours (default: 24)
+    
+    Returns grouped duplicates with the newest order first in each group.
+    """
+    try:
+        patient_nik = request.args.get('patient_national_id')
+        mrn = request.args.get('medical_record_number') 
+        modality = request.args.get('modality')
+        procedure_code = request.args.get('procedure_code')
+        procedure_name = request.args.get('procedure_name')
+        date_filter = request.args.get('date')
+        status_filter = request.args.get('status', 'exclude_deleted')
+        limit = min(max(1, int(request.args.get('limit', 5))), 20)
+        window_hours = min(max(1, int(request.args.get('window_hours', 24))), 168)  # Max 1 week
+        
+        with get_db_connection() as conn:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            
+            # Build WHERE conditions for duplicate detection
+            where_clauses = []
+            params = []
+            param_index = 1
+            
+            # Status filter
+            if status_filter == 'exclude_deleted':
+                where_clauses.append(f"COALESCE(status, '') NOT IN ('DELETED', 'CANCELED', 'CANCELLED', 'VOID')")
+            elif status_filter != 'all':
+                where_clauses.append(f"status = %s")
+                params.append(status_filter)
+            
+            # Patient filters
+            if patient_nik:
+                where_clauses.append(f"COALESCE(patient_national_id, '') = %s")
+                params.append(patient_nik)
+                
+            if mrn:
+                where_clauses.append(f"COALESCE(medical_record_number, '') = %s")
+                params.append(mrn)
+            
+            # Examination filters
+            if modality:
+                where_clauses.append(f"COALESCE(modality, '') = %s")
+                params.append(modality)
+                
+            if procedure_code:
+                where_clauses.append(f"COALESCE(procedure_code, '') = %s")
+                params.append(procedure_code)
+            elif procedure_name:
+                where_clauses.append(f"COALESCE(procedure_name, '') = %s")
+                params.append(procedure_name)
+            
+            # Date filter
+            if date_filter:
+                try:
+                    # Validate date format
+                    datetime.strptime(date_filter, '%Y-%m-%d')
+                    where_clauses.append(f"DATE(COALESCE(scheduled_at, created_at)) = %s")
+                    params.append(date_filter)
+                except ValueError:
+                    return jsonify({
+                        "status": "error",
+                        "message": "Invalid date format. Use YYYY-MM-DD."
+                    }), 400
+            
+            # Time window filter
+            where_clauses.append(f"created_at >= (CURRENT_TIMESTAMP - INTERVAL '%s hours')")
+            params.append(window_hours)
+            
+            where_sql = " AND ".join(where_clauses) if where_clauses else "TRUE"
+            
+            # Group by patient + examination + date to find duplicates
+            cursor.execute(f"""
+                WITH duplicate_groups AS (
+                    SELECT 
+                        COALESCE(patient_national_id, medical_record_number) as patient_key,
+                        COALESCE(procedure_code, procedure_name) as procedure_key,
+                        DATE(COALESCE(scheduled_at, created_at)) as order_date,
+                        COUNT(*) as order_count,
+                        ARRAY_AGG(id ORDER BY created_at DESC) as order_ids,
+                        ARRAY_AGG(order_number ORDER BY created_at DESC) as order_numbers,
+                        ARRAY_AGG(accession_number ORDER BY created_at DESC) as accession_numbers,
+                        ARRAY_AGG(status ORDER BY created_at DESC) as statuses,
+                        ARRAY_AGG(created_at ORDER BY created_at DESC) as created_ats
+                    FROM orders
+                    WHERE {where_sql}
+                    GROUP BY 
+                        COALESCE(patient_national_id, medical_record_number),
+                        COALESCE(procedure_code, procedure_name),
+                        DATE(COALESCE(scheduled_at, created_at))
+                    HAVING COUNT(*) > 1
+                    ORDER BY order_date DESC, patient_key, procedure_key
+                )
+                SELECT 
+                    patient_key,
+                    procedure_key, 
+                    order_date,
+                    order_count,
+                    order_ids,
+                    order_numbers,
+                    accession_numbers,
+                    statuses,
+                    created_ats,
+                    -- Mark the newest as potential primary
+                    order_ids[1] as primary_order_id,
+                    order_numbers[1] as primary_order_number
+                FROM duplicate_groups
+                LIMIT %s
+            """, params + [limit])
+            
+            duplicates = cursor.fetchall()
+            
+            # Format response
+            result = []
+            total_duplicate_groups = len(duplicates)
+            total_conflicting_orders = sum(d['order_count'] for d in duplicates)
+            
+            for dup in duplicates:
+                group_info = {
+                    'patient_key': dup['patient_key'],
+                    'procedure_key': dup['procedure_key'],
+                    'order_date': dup['order_date'].isoformat(),
+                    'order_count': dup['order_count'],
+                    'primary_order': {
+                        'id': str(dup['primary_order_id']),
+                        'order_number': dup['primary_order_number']
+                    },
+                    'orders': []
+                }
+                
+                for i in range(dup['order_count']):
+                    order_info = {
+                        'id': str(dup['order_ids'][i]),
+                        'order_number': dup['order_numbers'][i],
+                        'accession_number': dup['accession_numbers'][i],
+                        'status': dup['statuses'][i],
+                        'created_at': dup['created_ats'][i].isoformat() if dup['created_ats'][i] else None,
+                        'is_primary': i == 0
+                    }
+                    group_info['orders'].append(order_info)
+                
+                result.append(group_info)
+            
+            return jsonify({
+                "status": "success",
+                "duplicate_groups": result,
+                "summary": {
+                    "total_duplicate_groups": total_duplicate_groups,
+                    "total_conflicting_orders": total_conflicting_orders,
+                    "average_orders_per_group": round(total_conflicting_orders / total_duplicate_groups, 1) if total_duplicate_groups > 0 else 0,
+                    "window_hours": window_hours,
+                    "filters_applied": {
+                        "patient_national_id": patient_nik,
+                        "medical_record_number": mrn,
+                        "modality": modality,
+                        "procedure_code": procedure_code,
+                        "procedure_name": procedure_name,
+                        "date": date_filter,
+                        "status": status_filter
+                    }
+                }
+            }), 200
+            
+    except ValueError as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Invalid parameter: {str(e)}"
+        }), 400
+    except Exception as e:
+        logger.error(f"Error listing duplicate orders: {str(e)}", exc_info=True)
+        return jsonify({
+            "status": "error",
+            "message": "Failed to list duplicate orders",
+            "detail": str(e)
+        }), 500
+
+
+@app.route('/orders/source-status-stats', methods=['GET'])
+def source_status_stats():
+    """
+    Aggregated counts of orders by order_source and status for quality/routing dashboards.
+
+    - Excludes orders with status = 'DELETED'.
+    - Optional ?from= & ?to= (created_at range, same rules as /orders/source-stats).
+    """
+    try:
+        from_param = request.args.get('from')
+        to_param = request.args.get('to')
+
+        def parse_ts(value, is_end=False):
+            if not value:
+                return None
+            v = value.strip()
+            try:
+                if len(v) == 10 and v[4] == '-' and v[7] == '-':
+                    dt = datetime.strptime(v, "%Y-%m-%d")
+                    return dt + timedelta(days=1) if is_end else dt
+                return datetime.fromisoformat(v.replace('Z', '+00:00'))
+            except Exception:
+                return None
+
+        from_ts = parse_ts(from_param, is_end=False)
+        to_ts = parse_ts(to_param, is_end=True)
+
+        with get_db_connection() as conn:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+            where_clauses = ["COALESCE(status, '') <> 'DELETED'"]
+            params = []
+            if from_ts:
+                where_clauses.append("created_at >= %s")
+                params.append(from_ts)
+            if to_ts:
+                where_clauses.append("created_at < %s")
+                params.append(to_ts)
+
+            where_sql = " AND ".join(where_clauses) if where_clauses else "TRUE"
+
+            cursor.execute(
+                f"""
+                SELECT
+                    COALESCE(NULLIF(LOWER(TRIM(order_source)), ''), 'unknown') AS source,
+                    COALESCE(NULLIF(status, ''), 'UNKNOWN') AS status,
+                    COUNT(*)::bigint AS count
+                FROM orders
+                WHERE {where_sql}
+                GROUP BY
+                    COALESCE(NULLIF(LOWER(TRIM(order_source)), ''), 'unknown'),
+                    COALESCE(NULLIF(status, ''), 'UNKNOWN')
+                ORDER BY source, status
+                """,
+                params
+            )
+            rows = cursor.fetchall()
+
+            total = sum(int(r['count']) for r in rows) if rows else 0
+            by_source = {}
+            for r in rows:
+                src = r['source']
+                st = r['status']
+                c = int(r['count'])
+
+                src_entry = by_source.setdefault(src, {
+                    "source": src,
+                    "total": 0,
+                    "statuses": {}
+                })
+                src_entry["total"] += c
+                src_entry["statuses"][st] = src_entry["statuses"].get(st, 0) + c
+
+            sources = []
+            for src, info in by_source.items():
+                total_src = info["total"]
+                status_list = []
+                for st, c in sorted(info["statuses"].items(), key=lambda x: -x[1]):
+                    pct = (c / total_src * 100.0) if total_src > 0 else 0.0
+                    status_list.append({
+                        "status": st,
+                        "count": c,
+                        "percentage": round(pct, 2)
+                    })
+                pct_src = (total_src / total * 100.0) if total > 0 else 0.0
+                sources.append({
+                    "source": src,
+                    "total": total_src,
+                    "percentage_of_all": round(pct_src, 2),
+                    "statuses": status_list
+                })
+
+            return jsonify({
+                "status": "success",
+                "total": total,
+                "sources": sources
+            }), 200
+
+    except Exception as e:
+        logger.error(f"Error generating source-status stats: {str(e)}", exc_info=True)
+        return jsonify({
+            "status": "error",
+            "message": "Failed to compute source-status stats",
+            "detail": str(e)
+        }), 500
+
+
+@app.route('/orders/list', methods=['GET'])
+def list_orders():
+    """
+    List orders with primary fields only.
+
+    This endpoint is used by the API Gateway as the root list (/orders),
+    so response harus ringan dan stabil untuk konsumsi UI/integasi.
+
+    Response (ringkasan struktur):
+
+      {
+        "status": "success",
+        "orders": [
+          {
+            "id": "<uuid>",
+            "order_number": "ORD2025010100001",
+            "accession_number": "ACC20250101000001",
+            "patient_name": "John Doe",
+            "patient_national_id": "1234567890123456",
+            "medical_record_number": "MRN-001",
+            "modality": "CT",
+            "procedure_code": "CTHEAD",
+            "procedure_name": "CT Scan Head",
+            "registration_number": "REG-001",
+            "order_source": "simrs|api|pacs|unknown",
+            "status": "CREATED|SCHEDULED|COMPLETED|CANCELED|DELETED|...",
+            "order_status": "<opsional, status lanjutan>",
+            "worklist_status": "<status MWL jika ada>",
+            "satusehat_synced": true/false,
+            "scheduled_at": "2025-01-01T08:00:00Z",
+            "created_at": "2025-01-01T07:50:00Z",
+
+            "completed_at": "2025-01-01T09:00:00Z" | null,
+            "completed_by": "user@example.com" | null,
+            "cancel_at": "2025-01-01T08:10:00Z" | null,
+            "cancel_by": "user@example.com" | null
+          },
+          ...
+        ],
+        "count": 10,
+        "total": 123,
+        "limit": 100,
+        "offset": 0
+      }
+
+    Catatan lifecycle:
+    - completed_at / completed_by:
+        - Diisi otomatis saat status diupdate ke status selesai
+          (is_completed_status: COMPLETED/FINISHED/DONE) jika sebelumnya null.
+    - cancel_at / cancel_by:
+        - Diisi otomatis saat:
+            - DELETE /orders/<id> (soft delete), atau
+            - status diupdate ke status batal
+              (is_canceled_status: CANCELED/CANCELLED/VOID/DELETED)
+          jika sebelumnya null.
+    - Nilai tidak di-reset bila status berubah lagi; digunakan untuk audit trail yang robust.
+    """
+    try:
+        status = request.args.get('status')
+        date = request.args.get('date')
+        modality = request.args.get('modality')
+        source = request.args.get('source')
+        patient_nik = request.args.get('patient_national_id')
+        patient_mrn = request.args.get('medical_record_number')
+        procedure_code = request.args.get('procedure_code')
+        procedure_name = request.args.get('procedure_name')
+        # New: filter by SatuSehat sync flag (?satusehat_synced=true/false)
+        satusehat_synced_param = request.args.get('satusehat_synced')
+        # New: filter for potential duplicates (?duplicates=true)
+        duplicates_only = request.args.get('duplicates')
+        limit = request.args.get('limit', 100, type=int)
+        offset = request.args.get('offset', 0, type=int)
+
+        # Boundaries untuk mencegah abuse
+        if limit < 1:
+            limit = 1
+        if limit > 500:
+            limit = 500
+        if offset < 0:
+            offset = 0
+
+        with get_db_connection() as conn:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+            # Hanya pilih kolom utama yang relevan untuk tampilan list
+            base_query = """
+                FROM orders
+                WHERE status != 'DELETED'
+            """
+            params = []
+
+            if status:
+                base_query += " AND status = %s"
+                params.append(status)
+
+            if date:
+                base_query += " AND (scheduled_at::date) = %s"
+                params.append(date)
+
+            if modality:
+                base_query += " AND modality = %s"
+                params.append(modality)
+
+            if source:
+                # Normalisasi ke lower-case untuk konsistensi penyimpanan
+                base_query += " AND LOWER(COALESCE(order_source, '')) = %s"
+                params.append(source.lower())
+
+            # Patient filters
+            if patient_nik:
+                base_query += " AND COALESCE(patient_national_id, '') = %s"
+                params.append(patient_nik)
+
+            if patient_mrn:
+                base_query += " AND COALESCE(medical_record_number, '') = %s"
+                params.append(patient_mrn)
+
+            # Procedure filters
+            if procedure_code:
+                base_query += " AND COALESCE(procedure_code, '') = %s"
+                params.append(procedure_code)
+
+            if procedure_name:
+                base_query += " AND COALESCE(procedure_name, '') = %s"
+                params.append(procedure_name)
+
+            # Filter by SatuSehat sync status if provided
+            # ?satusehat_synced=true  -> satusehat_synced = TRUE
+            # ?satusehat_synced=false -> satusehat_synced IS FALSE OR satusehat_synced IS NULL
+            if satusehat_synced_param is not None:
+                raw = satusehat_synced_param.strip().lower()
+                if raw in ('true', '1', 'yes', 'y'):
+                    base_query += " AND satusehat_synced = TRUE"
+                elif raw in ('false', '0', 'no', 'n'):
+                    base_query += " AND (satusehat_synced = FALSE OR satusehat_synced IS NULL)"
+                # nilai lain diabaikan (tidak menambah kondisi)
+
+            # Duplicate detection filter
+            if duplicates_only and duplicates_only.lower() in ('true', '1', 'yes', 'y'):
+                # Add subquery to find orders that have duplicates
+                base_query += """
+                    AND (
+                        patient_national_id, medical_record_number, modality,
+                        procedure_code, procedure_name, DATE(COALESCE(scheduled_at, created_at))
+                    ) IN (
+                        SELECT 
+                            patient_national_id, medical_record_number, modality,
+                            procedure_code, procedure_name, DATE(COALESCE(scheduled_at, created_at))
+                        FROM orders o2
+                        WHERE status != 'DELETED'
+                        GROUP BY 
+                            patient_national_id, medical_record_number, modality,
+                            procedure_code, procedure_name, DATE(COALESCE(scheduled_at, created_at))
+                        HAVING COUNT(*) > 1
+                    )
+                """
+
+            # Total count (tanpa limit/offset)
+            cursor.execute(f"SELECT COUNT(*) {base_query}", params)
+            total = cursor.fetchone()['count']
+
+            # Data page dengan kolom utama saja
+            cursor.execute(f"""
+                SELECT
+                    id,
+                    order_number,
+                    accession_number,
+                    patient_name,
+                    patient_national_id,
+                    medical_record_number,
+                    modality,
+                    procedure_code,
+                    procedure_name,
+                    registration_number,
+                    order_source,
+                    status,
+                    order_status,
+                    worklist_status,
+                    satusehat_synced,
+                    scheduled_at,
+                    created_at,
+                    completed_at,
+                    completed_by,
+                    cancel_at,
+                    cancel_by,
+                    -- Add duplicate count for each order
+                    (
+                        SELECT COUNT(*) - 1
+                        FROM orders o2
+                        WHERE o2.status != 'DELETED'
+                          AND COALESCE(o2.patient_national_id, '') = COALESCE(orders.patient_national_id, '')
+                          AND COALESCE(o2.medical_record_number, '') = COALESCE(orders.medical_record_number, '')
+                          AND COALESCE(o2.modality, '') = COALESCE(orders.modality, '')
+                          AND (
+                            (COALESCE(o2.procedure_code, '') <> '' AND COALESCE(o2.procedure_code, '') = COALESCE(orders.procedure_code, ''))
+                            OR (COALESCE(o2.procedure_code, '') = '' AND COALESCE(o2.procedure_name, '') = COALESCE(orders.procedure_name, ''))
+                          )
+                          AND DATE(COALESCE(o2.scheduled_at, o2.created_at)) = DATE(COALESCE(orders.scheduled_at, orders.created_at))
+                    ) as duplicate_count
+                {base_query}
+                ORDER BY created_at DESC
+                LIMIT %s OFFSET %s
+            """, params + [limit, offset])
+
+            orders = cursor.fetchall()
+
+            # Normalisasi id ke string
+            for order in orders:
+                if order.get('id') is not None:
+                    order['id'] = str(order['id'])
+                # Ensure duplicate_count is 0 if null
+                if order.get('duplicate_count') is None:
+                    order['duplicate_count'] = 0
+
+            return jsonify({
+                "status": "success",
+                "orders": orders,
+                "count": len(orders),
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "filters": {
+                    "status": status,
+                    "date": date,
+                    "modality": modality,
+                    "source": source,
+                    "patient_national_id": patient_nik,
+                    "medical_record_number": patient_mrn,
+                    "procedure_code": procedure_code,
+                    "procedure_name": procedure_name,
+                    "satusehat_synced": satusehat_synced_param,
+                    "duplicates_only": duplicates_only
+                }
+            }), 200
+
+    except Exception as e:
+        logger.error(f"Error listing orders: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+## Add new endpoint to list all orders
+#@app.route('/orders/all', methods=['GET'])
+#def list_all_orders():
+#    try:
+#        with get_db_connection() as conn:
+#            cursor = conn.cursor(cursor_factory=RealDictCursor)
+#            query = "SELECT * FROM orders WHERE status != 'DELETED'"
+#            cursor.execute(query)
+#            orders = cursor.fetchall()
+#            
+#            # Convert UUID to string
+#            for order in orders:
+#                order['id'] = str(order['id'])
+#            
+#            return jsonify({
+#                "status": "success",
+#                "orders": orders,
+#                "count": len(orders)
+#            }), 200
+#            
+#    except Exception as e:
+#        logger.error(f"Error listing all orders: {str(e)}")
+#        return jsonify({"status": "error", "message": str(e)}), 500
+
+# Modify existing endpoint to simple version
+@app.route('/orders/all', methods=['GET'])
+def list_all_orders_simple():
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            query = """
+                SELECT 
+                    id,
+                    order_number,
+                    accession_number,
+                    patient_name,
+                    modality,
+                    order_source,
+                    status,
+                    created_at,
+                    completed_at,
+                    completed_by,
+                    cancel_at,
+                    cancel_by
+                FROM orders 
+                WHERE status != 'DELETED'
+            """
+            cursor.execute(query)
+            orders = cursor.fetchall()
+            
+            # Convert UUID to string
+            for order in orders:
+                order['id'] = str(order['id'])
+            
+            return jsonify({
+                "status": "success",
+                "orders": orders,
+                "count": len(orders)
+            }), 200
+            
+    except Exception as e:
+        logger.error(f"Error listing all orders: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+# Add new endpoint for detailed data
+@app.route('/orders/all/details', methods=['GET'])
+def list_all_orders_detailed():
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            query = "SELECT * FROM orders WHERE status != 'DELETED'"
+            cursor.execute(query)
+            orders = cursor.fetchall()
+            
+            # Convert UUID to string
+            for order in orders:
+                order['id'] = str(order['id'])
+            
+            return jsonify({
+                "status": "success",
+                "orders": orders,
+                "count": len(orders)
+            }), 200
+            
+    except Exception as e:
+        logger.error(f"Error listing all orders with details: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/orders/<identifier>', methods=['GET'])
+def get_order(identifier):
+    """Get order by ID, order number, or accession number"""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+            # Try UUID first (exclude deleted orders)
+            try:
+                uuid_obj = uuid.UUID(identifier)
+                cursor.execute(
+                    """
+                    SELECT * FROM orders
+                    WHERE id = %s AND status != 'DELETED'
+                    """,
+                    (str(uuid_obj),),
+                )
+            except ValueError:
+                # Try accession or order number (exclude deleted orders)
+                cursor.execute(
+                    """
+                    SELECT * FROM orders
+                    WHERE (accession_number = %s OR order_number = %s)
+                      AND status != 'DELETED'
+                    """,
+                    (identifier, identifier),
+                )
+
+            order = cursor.fetchone()
+            if not order:
+                return jsonify({"status": "error", "message": "Order not found"}), 404
+
+            order["id"] = str(order["id"])
+
+            return jsonify({"status": "success", "order": order}), 200
+
+    except Exception as e:
+        logger.error(f"Error getting order: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+# NOTE:
+# The /orders/<identifier>/files endpoints (GET/POST/DELETE/content) are implemented
+# once in the "ORDER FILES CRUD" section below to avoid duplicate view functions.
+
+
+@app.route('/orders/<identifier>/satusehat-status', methods=['GET'])
+def get_order_satusehat_status(identifier):
+    """
+    Get concise SatuSehat status info for a specific order.
+
+    Identifier:
+      - UUID id, atau
+      - accession_number, atau
+      - order_number
+
+    Hanya mengembalikan order dengan status != 'DELETED'.
+
+    Contoh output:
+      {
+        "status": "success",
+        "order_id": "...",
+        "order_number": "ORD2025111000001",
+        "accession_number": "ACC20251110000123",
+        "satusehat_synced": true,
+        "satusehat_sync_date": "2025-11-10T07:20:30Z",
+        "satusehat_service_request_id": "abcd-1234",
+        "order_status": "SYNCED",
+        "last_updated": "2025-11-10T07:20:30Z",
+        "satusehat_sync_details": {
+          "status": "success",
+          "service_request_id": "abcd-1234",
+          "ihs_number": "...",
+          "encounter_id": "...",
+          "synced_at": "2025-11-10T07:20:30Z",
+          "upstream": {
+            "status": 201,
+            "x_request_id": "...",
+            "url": "..."
+          }
+        },
+        "updated_audit": {
+          "by": "admin@example.com",
+          "at": "2025-11-10T07:20:30Z",
+          "action": "SATUSEHAT_SYNC"
+        }
+      }
+    """
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+            # Resolve order by id / accession_number / order_number
+            try:
+                uuid_obj = uuid.UUID(identifier)
+                cursor.execute("""
+                    SELECT *
+                    FROM orders
+                    WHERE id = %s AND status != 'DELETED'
+                """, (str(uuid_obj),))
+            except ValueError:
+                cursor.execute("""
+                    SELECT *
+                    FROM orders
+                    WHERE (accession_number = %s OR order_number = %s)
+                      AND status != 'DELETED'
+                """, (identifier, identifier))
+
+            order = cursor.fetchone()
+            if not order:
+                return jsonify({"status": "error", "message": "Order not found"}), 404
+
+            # Normalisasi id
+            if order.get('id') is not None:
+                order_id = str(order['id'])
+            else:
+                order_id = None
+
+            # Ambil blok details jika ada
+            details = order.get('details')
+            if isinstance(details, dict):
+                satusehat_sync_details = details.get('satusehat_sync')
+                updated_audit = details.get('updated')
+            else:
+                satusehat_sync_details = None
+                updated_audit = None
+
+            resp = {
+                "status": "success",
+                "order_id": order_id,
+                "order_number": order.get('order_number'),
+                "accession_number": order.get('accession_number'),
+                "satusehat_synced": order.get('satusehat_synced'),
+                "satusehat_sync_date": order.get('satusehat_sync_date'),
+                "satusehat_service_request_id": order.get('satusehat_service_request_id'),
+                "order_status": order.get('order_status') or order.get('status'),
+                "last_updated": order.get('updated_at'),
+                "satusehat_sync_details": satusehat_sync_details,
+                "updated_audit": updated_audit
+            }
+
+            return jsonify(resp), 200
+
+    except Exception as e:
+        logger.error(f"Error getting SatuSehat status for order {identifier}: {str(e)}", exc_info=True)
+        return jsonify({
+            "status": "error",
+            "message": "Failed to get SatuSehat status for order",
+            "detail": str(e)
+        }), 500
+
+@app.route('/orders/<identifier>/sync-satusehat', methods=['POST'])
+def sync_to_satusehat(identifier):
+    """Sync order ke SATUSEHAT (buat ServiceRequest nyata)"""
+    try:
+        # Ambil order
+        with get_db_connection() as conn:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            try:
+                uuid_obj = uuid.UUID(identifier)
+                cursor.execute("SELECT * FROM orders WHERE id = CAST(%s AS UUID)", (str(uuid_obj),))
+            except ValueError:
+                cursor.execute("SELECT * FROM orders WHERE accession_number = %s", (identifier,))
+            order = cursor.fetchone()
+            if not order:
+                return jsonify({"status": "error", "message": "Order not found"}), 404
+
+        body = request.get_json(silent=True) or {}
+        # Patient & Encounter dari SATUSEHAT harus tersedia (real id)
+        satusehat_ihs_number = (
+            body.get('satusehat_ihs_number')
+            or body.get('satusehat_patient_id')
+            or body.get('patientId')
+            or body.get('ihs_number')
+            or order.get('satusehat_ihs_number')
+        )
+        encounter_id = body.get('satusehat_encounter_id') or body.get('encounterId') or order.get('satusehat_encounter_id')
+        if not satusehat_ihs_number:
+            return jsonify({
+                "status": "error",
+                "message": "satusehat_ihs_number diperlukan (isi di body atau simpan di order)."
+            }), 400
+        if not encounter_id:
+            return jsonify({
+                "status": "error",
+                "message": "satusehat_encounter_id diperlukan (isi di body atau simpan di order)."
+            }), 400
+
+        # LOINC/procedure code
+        loinc_code = body.get('loinc_code') or body.get('procedure_code') or order.get('procedure_code')
+        if not loinc_code:
+            return jsonify({
+                "status": "error",
+                "message": "procedure_code/loinc_code tidak ditemukan. Harap isi dengan kode LOINC yang valid."
+            }), 400
+
+        requester_ref = body.get('requester_ref') or SATUSEHAT_REQUESTER_REF
+        performer_ref = body.get('performer_ref') or SATUSEHAT_PERFORMER_REF
+
+        # Siapkan payload ServiceRequest
+        accession_number = order['accession_number']
+        identifier_system = f"{ACSN_SYSTEM_BASE.rstrip('/')}/{SATUSEHAT_ORG_ID}"
+        sr = {
+            "resourceType": "ServiceRequest",
+            "status": "active",
+            "intent": "order",
+            "code": {"coding": [{"system": "http://loinc.org", "code": loinc_code}]},
+            "subject": {"reference": f"Patient/{satusehat_ihs_number}"},
+            "encounter": {"reference": f"Encounter/{encounter_id}"},
+            "identifier": [{"system": identifier_system, "value": accession_number}],
+            "authoredOn": now_utc_fhir()
+        }
+        notes = order.get('clinical_notes') or order.get('clinical_indication')
+        if notes:
+            sr["note"] = [{"text": notes}]
+        if requester_ref:
+            sr["requester"] = {"reference": requester_ref}
+        if performer_ref:
+            sr["performer"] = [{"reference": performer_ref}]
+
+        # Token & submit ke FHIR
+        token = get_satusehat_token()
+        url = f"{SATUSEHAT_FHIR_BASE}/ServiceRequest"
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/fhir+json"}
+        resp = requests.post(url, json=sr, headers=headers, timeout=45)
+        # Simpan upstream info untuk debug
+        upstream = {
+            "status": resp.status_code,
+            "x_request_id": resp.headers.get("x-request-id"),
+            "url": url
+        }
+        if resp.status_code >= 300:
+            try:
+                js = resp.json()
+            except Exception:
+                js = None
+            return jsonify({
+                "status": "error",
+                "message": summarize_operation_outcome(js) or (resp.text[:1000] if resp.text else "<empty body>"),
+                "upstream": upstream,
+                "sent": sr
+            }), 502
+
+        sr_id = resp.json().get('id')
+
+        # Siapkan metadata audit & detail sync SATUSEHAT di kolom details
+        try:
+            actor_info = resolve_request_actor()
+        except Exception as actor_err:
+            logger.warning(f"resolve_request_actor error in sync_to_satusehat: {actor_err}")
+            actor_info = {}
+
+        if not isinstance(actor_info, dict):
+            actor_info = {}
+
+        actor_id = (
+            actor_info.get('id')
+            or actor_info.get('username')
+            or request.headers.get('X-User-ID')
+            or 'system'
+        )
+        actor_username = actor_info.get('username')
+        actor_display = actor_username or actor_id or 'system'
+
+        # existing details + pastikan struktur created/updated/deleted rapi
+        updated_details = ensure_audit_structure(order.get('details'), order.get('created_at'))
+
+        # Simpan jejak khusus untuk operasi sync SATUSEHAT
+        # Field ini yang nanti dibaca dashboard UI.
+        updated_details['satusehat_sync'] = {
+            "status": "success",
+            "service_request_id": sr_id,
+            "ihs_number": satusehat_ihs_number,
+            "encounter_id": encounter_id,
+            "synced_at": utc_now_iso(),
+            "upstream": upstream
+        }
+
+        # Update blok "updated" umum sebagai audit siapa yang terakhir ubah
+        updated_details['updated'] = {
+            "by": actor_display,
+            "at": utc_now_iso(),
+            "action": "SATUSEHAT_SYNC"
+        }
+
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE orders 
+                SET satusehat_ihs_number = %s,
+                    satusehat_encounter_id = %s,
+                    satusehat_service_request_id = %s,
+                    satusehat_synced = TRUE,
+                    satusehat_sync_date = CURRENT_TIMESTAMP,
+                    order_status = 'SYNCED',
+                    updated_at = CURRENT_TIMESTAMP,
+                    details = %s
+                WHERE id = %s
+                """,
+                (satusehat_ihs_number, encounter_id, sr_id, Json(updated_details), str(order['id']))
+            )
+            log_order_action(
+                order['id'], order['order_number'], order['accession_number'],
+                'SATUSEHAT_SYNCED',
+                {"status": order['order_status']},
+                {"service_request_id": sr_id, "upstream": upstream},
+                request.headers.get('X-User-ID', 'system'),
+                request.remote_addr
+            )
+
+        return jsonify({
+            "status": "success",
+            "message": "ServiceRequest dibuat di SATUSEHAT",
+            "accession_number": accession_number,
+            "satusehat_ihs_number": satusehat_ihs_number,
+            "satusehat_encounter_id": encounter_id,
+            "satusehat_service_request_id": sr_id,
+            "upstream": upstream
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error syncing to SATUSEHAT: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/orders/<identifier>/create-worklist', methods=['POST'])
+def create_worklist_from_order(identifier, jwt_token=None):
+    """Create DICOM worklist from order"""
+    try:
+        # Allow route calls without explicitly passing jwt_token
+        if jwt_token is None:
+            auth_header = request.headers.get('Authorization')
+            if auth_header and auth_header.startswith('Bearer '):
+                jwt_token = auth_header.split(' ')[1]
+        # Get order
+        with get_db_connection() as conn:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            try:
+                uuid_obj = uuid.UUID(identifier)
+                cursor.execute("SELECT * FROM orders WHERE id = CAST(%s AS UUID)", (str(uuid_obj),))
+            except ValueError:
+                cursor.execute("SELECT * FROM orders WHERE accession_number = %s", (identifier,))
+            order = cursor.fetchone()
+            if not order:
+                return jsonify({"status": "error", "message": "Order not found"}), 404
+        # Create worklist payload
+        scheduled_date = None
+        scheduled_time = None
+        try:
+            scheduled_at = order.get('scheduled_at')
+            if scheduled_at:
+                dt_val = scheduled_at if isinstance(scheduled_at, datetime) else datetime.fromisoformat(str(scheduled_at).replace('Z', '+00:00'))
+                scheduled_date = dt_val.strftime('%Y%m%d')
+                scheduled_time = dt_val.strftime('%H%M%S')
+        except Exception:
+            scheduled_date = None
+            scheduled_time = None
+        patient_identifier = order.get('patient_national_id') or order.get('patient_id')
+        worklist_data = {
+            "patient_name": order['patient_name'].replace(' ', '^'),
+            "patient_id": patient_identifier,
+            "patient_birth_date": order['birth_date'].strftime('%Y%m%d') if order['birth_date'] else None,
+            "patient_sex": order['gender'],
+            "accession_number": order['accession_number'],
+            "procedure_description": order['procedure_description'] or order['procedure_name'],
+            "modality": order['modality'],
+            "scheduled_date": scheduled_date,
+            "scheduled_time": scheduled_time,
+            "physician_name": order['ordering_physician_name'].replace(' ', '^') if order['ordering_physician_name'] else None,
+            "station_aet": MWL_STATION_AET
+        }
+        # Call MWL Writer service
+        try:
+            headers = {'Authorization': f'Bearer {jwt_token}'} if jwt_token else {}
+            response = requests.post(
+                f"{MWL_SERVICE_URL}/worklist/create",
+                json=worklist_data,
+                headers=headers,
+                timeout=10
+            )
+            response.raise_for_status()
+            mwl_response = response.json()
+            # Update order status
+            actor_id = request.headers.get('X-User-ID', 'system')
+            updated_details = ensure_audit_structure(order.get('details'), order.get('created_at'))
+            updated_details['updated'] = {'by': actor_id, 'at': utc_now_iso()}
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    UPDATE orders 
+                    SET worklist_status = 'CREATED',
+                        order_status = 'SCHEDULED',
+                        updated_at = CURRENT_TIMESTAMP,
+                        details = %s
+                    WHERE id = %s
+                    """,
+                    (Json(updated_details), str(order['id']))
+                )
+                log_order_action(
+                    order['id'], order['order_number'], order['accession_number'],
+                    'WORKLIST_CREATED',
+                    {"status": order['order_status']},
+                    mwl_response,
+                    request.headers.get('X-User-ID', 'system'),
+                    request.remote_addr
+                )
+            return jsonify({
+                "status": "success",
+                "message": "Worklist created successfully",
+                "accession_number": order['accession_number'],
+                "worklist": mwl_response
+            }), 200
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error calling MWL service: {str(e)}")
+            return jsonify({
+                "status": "error",
+                "message": f"Failed to create worklist: {str(e)}"
+            }), 500
+    except Exception as e:
+        logger.error(f"Error creating worklist: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/orders/complete-flow', methods=['GET'])
+def complete_flow_wrong_method():
+    """Guard: prevent accidental GET on complete-flow, instruct to use POST"""
+    return jsonify({
+        "status": "error",
+        "message": "Use POST /orders/complete-flow with JSON body"
+    }), 405
+
+@app.route('/orders/complete-flow', methods=['POST'])
+@require_auth(REQUIRED_PERMISSIONS_OM['complete_flow'])
+def complete_flow():
+    """Complete flow: Create order → Sync SATUSEHAT → Create Worklist"""
+    try:
+        auth_header = request.headers.get('Authorization')
+        jwt_token = auth_header.split(' ')[1] if auth_header and auth_header.startswith('Bearer ') else None
+
+        data = request.get_json()
+        
+        # Step 1: Create order
+        order_response = create_order()
+        if order_response[1] != 201:
+            return order_response
+        
+        order_data = order_response[0].get_json()
+        order_obj = order_data.get('order') or {}
+        order_id = order_obj.get('id')
+        accession_number = order_obj.get('accession_number')
+        if not order_id or not accession_number:
+            return jsonify({"status": "error", "message": "Invalid order response from create"}), 500
+        
+        logger.info(f"Step 1: Order created - {accession_number}")
+        
+        # Step 2: Sync to SATUSEHAT
+        sync_payload = None
+        sync_error = None
+        sync_response = sync_to_satusehat(order_id)
+        resp_obj, resp_status = (
+            sync_response if isinstance(sync_response, tuple)
+            else (sync_response, getattr(sync_response, 'status_code', 500))
+        )
+        if resp_status != 200:
+            try:
+                sync_error = resp_obj.get_json()
+            except Exception:
+                if hasattr(resp_obj, "get_data"):
+                    try:
+                        raw_body = resp_obj.get_data(as_text=True)
+                    except TypeError:
+                        raw_body = resp_obj.get_data()
+                        if isinstance(raw_body, bytes):
+                            raw_body = raw_body.decode("utf-8", errors="replace")
+                    sync_error = {"message": raw_body}
+                else:
+                    sync_error = {"message": str(resp_obj)}
+            logger.warning(f"Step 2 warning: SATUSEHAT sync failed ({resp_status}) - {accession_number} - {sync_error}")
+            if not SATUSEHAT_SYNC_OPTIONAL:
+                return resp_obj, resp_status
+        else:
+            sync_payload = resp_obj.get_json()
+            logger.info(f"Step 2: SATUSEHAT synced - {accession_number}")
+        
+        # Step 3: Create worklist
+        worklist_response = create_worklist_from_order(order_id, jwt_token)
+        if worklist_response[1] != 200:
+            return worklist_response
+        
+        logger.info(f"Step 3: Worklist created - {accession_number}")
+        
+        return jsonify({
+            "status": "success",
+            "message": "Complete flow executed successfully",
+            "accession_number": accession_number,
+            "order": order_obj,
+            "satusehat": sync_payload or {"status": "skipped", "error": sync_error} if sync_error else None,
+            "worklist": worklist_response[0].get_json(),
+            "next_steps": {
+                "1": "Simulate scan",
+                "2": "DICOM Router will process automatically",
+                "3": "ImagingStudy will be created in SATUSEHAT"
+            }
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error in complete flow: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/orders/<identifier>', methods=['DELETE'])
+def delete_order(identifier):
+    """Delete order by ID, order number, or accession number"""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            
+            # Try UUID first
+            try:
+                uuid_obj = uuid.UUID(identifier)
+                cursor.execute("SELECT * FROM orders WHERE id = %s", (str(uuid_obj),))
+            except ValueError:
+                # Try accession or order number
+                cursor.execute("""
+                    SELECT * FROM orders 
+                    WHERE (accession_number = %s OR order_number = %s)
+                """, (identifier, identifier))
+            
+            order = cursor.fetchone()
+
+            if not order:
+                return jsonify({"status": "error", "message": "Order not found"}), 404
+
+            order_details = order.get('details')
+            deleted_marker = None
+            if isinstance(order_details, dict):
+                deleted_marker = order_details.get('deleted')
+            elif order_details is not None:
+                logger.warning("Order details stored as non-dict value; treating as already deleted safeguard.")
+
+            already_soft_deleted = order.get('status') == 'DELETED' or deleted_marker is not None
+            if already_soft_deleted:
+                return jsonify({
+                    "status": "error",
+                    "message": f"Order already soft deleted. Use DELETE /orders/{identifier}/purge to remove it permanently."
+                }), 409
+
+            # Soft delete by marking details.deleted
+            try:
+                actor_info = resolve_request_actor()
+            except Exception as actor_err:
+                logger.error(f"Error in resolve_request_actor: {actor_err}")
+                actor_info = {}
+
+            if not isinstance(actor_info, dict):
+                logger.warning(f"resolve_request_actor returned non-dict, using defaults")
+                actor_info = {}
+
+            actor_id = actor_info.get('id') or actor_info.get('username') or 'system'
+
+            # Safely get order details and created_at
+            order_created_at = order.get('created_at')
+
+            updated_details = ensure_audit_structure(order_details, order_created_at)
+            updated_details['deleted'] = {'by': actor_id, 'at': utc_now_iso()}
+            
+            cursor.execute(
+                """
+                UPDATE orders 
+                SET details = %s,
+                    status = 'DELETED',
+                    cancel_at = CURRENT_TIMESTAMP,
+                    cancel_by = %s,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+                """,
+                (Json(updated_details), actor_id, str(order['id']))
+            )
+            
+            log_order_action(
+                order['id'], order['order_number'], order['accession_number'],
+                'ORDER_DELETED',
+                {"previous_status": order['status']},
+                None,
+                actor_id,
+                request.remote_addr
+            )
+            
+            return jsonify({
+                "status": "success",
+                "message": "Order deleted successfully",
+                "order_id": str(order['id']),
+                "accession_number": order['accession_number']
+            }), 200
+            
+    except Exception as e:
+        logger.error(f"Error deleting order: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/orders/duplicates/auto-cancel', methods=['POST'])
+def auto_cancel_duplicates():
+    """
+    Manually trigger auto-cancel for duplicate orders based on criteria.
+    
+    Request body:
+    {
+        "patient_national_id": "string",  // optional
+        "medical_record_number": "string", // optional  
+        "modality": "string",              // optional
+        "procedure_code": "string",        // optional
+        "procedure_name": "string",        // optional
+        "date": "YYYY-MM-DD",              // optional
+        "window_hours": 24,                // optional, default 24
+        "keep_newest": true,               // optional, default true
+        "dry_run": false                   // optional, default false
+    }
+    
+    Returns list of orders that would be/were canceled.
+    """
+    try:
+        body = request.get_json() or {}
+        
+        patient_nik = body.get('patient_national_id')
+        mrn = body.get('medical_record_number')
+        modality = body.get('modality')
+        procedure_code = body.get('procedure_code')
+        procedure_name = body.get('procedure_name')
+        date_filter = body.get('date')
+        window_hours = min(max(1, int(body.get('window_hours', 24))), 168)
+        keep_newest = body.get('keep_newest', True)
+        dry_run = body.get('dry_run', False)
+        
+        # Validate at least one filter is provided
+        if not any([patient_nik, mrn, modality, procedure_code, procedure_name, date_filter]):
+            return jsonify({
+                "status": "error",
+                "message": "At least one filter parameter is required"
+            }), 400
+        
+        with get_db_connection() as conn:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            
+            # Build WHERE conditions
+            where_clauses = ["COALESCE(status, '') NOT IN ('DELETED', 'CANCELED', 'CANCELLED', 'VOID')"]
+            params = []
+            
+            if patient_nik:
+                where_clauses.append("COALESCE(patient_national_id, '') = %s")
+                params.append(patient_nik)
+                
+            if mrn:
+                where_clauses.append("COALESCE(medical_record_number, '') = %s")
+                params.append(mrn)
+            
+            if modality:
+                where_clauses.append("COALESCE(modality, '') = %s")
+                params.append(modality)
+                
+            if procedure_code:
+                where_clauses.append("COALESCE(procedure_code, '') = %s")
+                params.append(procedure_code)
+            elif procedure_name:
+                where_clauses.append("COALESCE(procedure_name, '') = %s")
+                params.append(procedure_name)
+            
+            if date_filter:
+                try:
+                    datetime.strptime(date_filter, '%Y-%m-%d')
+                    where_clauses.append("DATE(COALESCE(scheduled_at, created_at)) = %s")
+                    params.append(date_filter)
+                except ValueError:
+                    return jsonify({
+                        "status": "error",
+                        "message": "Invalid date format. Use YYYY-MM-DD."
+                    }), 400
+            
+            where_clauses.append("created_at >= (CURRENT_TIMESTAMP - INTERVAL '%s hours')")
+            params.append(window_hours)
+            
+            where_sql = " AND ".join(where_clauses)
+            
+            # Find potential duplicates
+            cursor.execute(f"""
+                WITH ranked_orders AS (
+                    SELECT 
+                        *,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY 
+                                COALESCE(patient_national_id, medical_record_number),
+                                COALESCE(procedure_code, procedure_name),
+                                DATE(COALESCE(scheduled_at, created_at))
+                            ORDER BY created_at DESC
+                        ) as rn
+                    FROM orders
+                    WHERE {where_sql}
+                )
+                SELECT * FROM ranked_orders 
+                WHERE rn > 1  -- Keep only duplicates (not the newest)
+                ORDER BY patient_national_id, procedure_code, created_at DESC
+            """, params)
+            
+            duplicates_to_cancel = cursor.fetchall()
+            
+            if not duplicates_to_cancel:
+                return jsonify({
+                    "status": "success",
+                    "message": "No duplicate orders found for the given criteria",
+                    "canceled_count": 0,
+                    "canceled_orders": [],
+                    "dry_run": dry_run
+                }), 200
+            
+            canceled_orders = []
+            
+            if not dry_run:
+                # Perform the actual cancellation
+                actor_info = resolve_request_actor()
+                actor_id = (actor_info.get('id') or actor_info.get('username') or 'system')
+                
+                for order in duplicates_to_cancel:
+                    try:
+                        # Update details with deletion info
+                        order_details = ensure_audit_structure(order.get('details'), order.get('created_at'))
+                        order_details['deleted'] = {
+                            'by': actor_id,
+                            'at': utc_now_iso(),
+                            'reason': 'MANUAL_AUTO_CANCEL'
+                        }
+                        
+                        cursor.execute(
+                            """
+                            UPDATE orders
+                            SET status = 'DELETED',
+                                cancel_at = CURRENT_TIMESTAMP,
+                                cancel_by = %s,
+                                details = %s,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE id = %s
+                            """,
+                            (actor_id, Json(order_details), str(order['id']))
+                        )
+                        
+                        canceled_info = {
+                            'id': str(order['id']),
+                            'order_number': order['order_number'],
+                            'accession_number': order['accession_number'],
+                            'patient_name': order['patient_name'],
+                            'modality': order['modality'],
+                            'procedure': order['procedure_code'] or order['procedure_name'],
+                            'status_before': order['status'],
+                            'canceled_at': utc_now_iso(),
+                            'canceled_by': actor_id
+                        }
+                        canceled_orders.append(canceled_info)
+                        
+                        # Log the cancellation
+                        log_order_action(
+                            order['id'],
+                            order['order_number'],
+                            order['accession_number'],
+                            'ORDER_MANUALLY_CANCELED_DUPLICATE',
+                            {"previous_status": order['status']},
+                            {
+                                "reason": "MANUAL_AUTO_CANCEL",
+                                "criteria": {
+                                    "patient_nik": patient_nik,
+                                    "mrn": mrn,
+                                    "modality": modality,
+                                    "procedure_code": procedure_code,
+                                    "procedure_name": procedure_name,
+                                    "date": date_filter
+                                }
+                            },
+                            actor_id,
+                            request.remote_addr
+                        )
+                        
+                    except Exception as e:
+                        logger.error(f"Failed to cancel duplicate order {order['id']}: {e}")
+                        continue
+                
+                conn.commit()
+            
+            return jsonify({
+                "status": "success",
+                "message": f"Processed {len(canceled_orders)} duplicate orders",
+                "canceled_count": len(canceled_orders),
+                "canceled_orders": canceled_orders,
+                "dry_run": dry_run,
+                "criteria": {
+                    "patient_national_id": patient_nik,
+                    "medical_record_number": mrn,
+                    "modality": modality,
+                    "procedure_code": procedure_code,
+                    "procedure_name": procedure_name,
+                    "date": date_filter,
+                    "window_hours": window_hours,
+                    "keep_newest": keep_newest
+                }
+            }), 200
+            
+    except Exception as e:
+        logger.error(f"Error in auto-cancel duplicates: {str(e)}", exc_info=True)
+        return jsonify({
+            "status": "error",
+            "message": "Failed to process auto-cancel duplicates",
+            "detail": str(e)
+        }), 500
+
+
+@app.route('/orders/<identifier>/purge', methods=['DELETE'])
+def purge_order(identifier):
+    """Hard delete order from database. Intended for use after a soft delete."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+            # Try UUID first
+            try:
+                uuid_obj = uuid.UUID(identifier)
+                cursor.execute("SELECT * FROM orders WHERE id = %s", (str(uuid_obj),))
+            except ValueError:
+                cursor.execute("""
+                    SELECT * FROM orders
+                    WHERE (accession_number = %s OR order_number = %s)
+                """, (identifier, identifier))
+
+            order = cursor.fetchone()
+
+            if not order:
+                return jsonify({"status": "error", "message": "Order not found"}), 404
+
+            try:
+                actor_info = resolve_request_actor()
+            except Exception as actor_err:
+                logger.error(f"Error in resolve_request_actor: {actor_err}")
+                actor_info = {}
+
+            if not isinstance(actor_info, dict):
+                logger.warning("resolve_request_actor returned non-dict, using defaults")
+                actor_info = {}
+
+            actor_id = actor_info.get('id') or actor_info.get('username') or 'system'
+
+            cursor.execute(
+                "DELETE FROM orders WHERE id = %s",
+                (str(order['id']),)
+            )
+
+            if cursor.rowcount == 0:
+                return jsonify({"status": "error", "message": "Order not found"}), 404
+
+            log_order_action(
+                order['id'], order['order_number'], order['accession_number'],
+                'ORDER_PURGED',
+                {"previous_status": order.get('status')},
+                None,
+                actor_id,
+                request.remote_addr
+            )
+
+            return jsonify({
+                "status": "success",
+                "message": "Order purged successfully",
+                "order_id": str(order['id']),
+                "accession_number": order['accession_number']
+            }), 200
+
+    except Exception as e:
+        logger.error(f"Error purging order: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+# Add new endpoint for updating orders
+@app.route('/orders/<identifier>', methods=['PUT'])
+def update_order(identifier):
+    """
+    Partially update an order.
+
+    Request identifier:
+      - id (UUID), or
+      - accession_number, or
+      - order_number
+
+    Rules:
+      - Protected fields cannot be updated.
+      - Unknown/unsupported fields cause 400 with explanation.
+      - Some common aliases are mapped to canonical columns.
+      - JSON fields are stored properly.
+    """
+    try:
+        body = request.get_json(silent=True) or {}
+
+        with get_db_connection() as conn:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+            # Resolve target order
+            try:
+                uuid_obj = uuid.UUID(identifier)
+                cursor.execute("SELECT * FROM orders WHERE id = %s", (str(uuid_obj),))
+            except ValueError:
+                cursor.execute(
+                    """
+                    SELECT * FROM orders
+                    WHERE (accession_number = %s OR order_number = %s)
+                    """,
+                    (identifier, identifier),
+                )
+
+            order = cursor.fetchone()
+            if not order:
+                return jsonify({"status": "error", "message": "Order not found"}), 404
+
+            old_status = (order.get('status') or '').upper()
+
+            # Fields that must never be updated directly via this endpoint
+            protected_fields = {
+                'id',
+                'order_number',
+                'accession_number',
+                'created_at',
+                'updated_at',
+                'satusehat_service_request_id',
+                'order_source',
+            }
+
+            # Aliases from client payload -> canonical column names
+            alias_map = {
+                'requested_procedure': 'procedure_name',
+                'station_ae_title': 'ordering_station_aet',
+                'scheduled_start_at': 'scheduled_at',
+                # accession_no is intentionally NOT mapped for update safety
+            }
+
+            # Known JSON/JSONB columns that should use psycopg2.extras.Json
+            json_fields = {
+                'details',
+                'metadata',  # if column exists
+            }
+
+            update_clauses = []
+            params = []
+            invalid_fields = []
+
+            # Lifecycle status (use global helpers)
+            requested_status = None
+
+            for raw_key, value in body.items():
+                # Map alias if defined
+                key = alias_map.get(raw_key, raw_key)
+
+                # Skip protected fields (id, accession_number, etc.)
+                if key in protected_fields:
+                    invalid_fields.append(raw_key)
+                    continue
+
+                # Column must exist in current order row
+                if key not in order:
+                    invalid_fields.append(raw_key)
+                    continue
+
+                # Capture requested status change for lifecycle handling
+                if key == 'status' and isinstance(value, str):
+                    requested_status = value.strip().upper()
+
+                # Handle JSON columns
+                if key in json_fields and value is not None:
+                    update_clauses.append(f"{key} = %s")
+                    params.append(Json(value))
+                else:
+                    update_clauses.append(f"{key} = %s")
+                    params.append(value)
+
+            # If there are invalid fields, reject with clear message
+            if invalid_fields:
+                # Build allowed_fields from current order keys minus protected
+                allowed_fields = sorted(
+                    [k for k in order.keys() if k not in protected_fields]
+                )
+                return jsonify({
+                    "status": "error",
+                    "message": "Some fields are not allowed or not recognized for update",
+                    "invalid_fields": invalid_fields,
+                    "allowed_fields": allowed_fields,
+                    "hint": "Use canonical column names or supported aliases: "
+                            "requested_procedure→procedure_name, "
+                            "station_ae_title→ordering_station_aet, "
+                            "scheduled_start_at→scheduled_at"
+                }), 400
+
+            if not update_clauses:
+                return jsonify({
+                    "status": "error",
+                    "message": "No valid fields to update"
+                }), 400
+
+            # Apply lifecycle side effects based on status change
+            actor = request.headers.get('X-User-ID') or request.headers.get('X-User-Name') \
+                or request.headers.get('X-Username') or 'system'
+
+            if requested_status:
+                # Only if status actually changes
+                if requested_status != old_status:
+                    # Completed-state: set completed_at/by once
+                    if is_completed_status(requested_status) and not order.get('completed_at'):
+                        update_clauses.append("completed_at = CURRENT_TIMESTAMP")
+                        update_clauses.append("completed_by = %s")
+                        params.append(actor)
+                    # Canceled/void/deleted-state: set cancel_at/by once
+                    if is_canceled_status(requested_status) and not order.get('cancel_at'):
+                        update_clauses.append("cancel_at = CURRENT_TIMESTAMP")
+                        update_clauses.append("cancel_by = %s")
+                        params.append(actor)
+
+            # Always update updated_at
+            update_clauses.append("updated_at = CURRENT_TIMESTAMP")
+
+            params.append(str(order['id']))
+            sql = f"""
+                UPDATE orders
+                SET {', '.join(update_clauses)}
+                WHERE id = %s
+            """
+            cursor.execute(sql, params)
+
+            # Audit log
+            log_order_action(
+                order['id'],
+                order['order_number'],
+                order['accession_number'],
+                'ORDER_UPDATED',
+                {"previous_status": order.get('status')},
+                body,
+                request.headers.get('X-User-ID', 'system'),
+                request.remote_addr,
+            )
+
+            return jsonify({
+                "status": "success",
+                "message": "Order updated successfully",
+                "order_id": str(order['id']),
+                "accession_number": order['accession_number'],
+            }), 200
+
+    except Exception as e:
+        logger.error(f"Error updating order: {str(e)}", exc_info=True)
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+# -----------------------------------------------------------------------------
+# ORDER FILES CRUD (metadata only, JSON via Gateway)
+# -----------------------------------------------------------------------------
+
+@app.route('/orders/<identifier>/files', methods=['GET'])
+def get_order_files(identifier):
+    """
+    List files associated with an order.
+
+    Identifier:
+      - UUID id, atau
+      - accession_number, atau
+      - order_number.
+
+    Hanya orders dengan status != 'DELETED'.
+    Auth & permission:
+      - Dihandle di API Gateway (order:read atau *).
+    """
+    try:
+        with get_db_connection() as conn:
+            oc = conn.cursor(cursor_factory=RealDictCursor)
+            # Resolve order
+            try:
+                uuid_obj = uuid.UUID(identifier)
+                oc.execute(
+                    """
+                    SELECT id, order_number, accession_number, patient_name,
+                           modality, status, created_at
+                    FROM orders
+                    WHERE id = %s AND status != 'DELETED'
+                    """,
+                    (str(uuid_obj),),
+                )
+            except ValueError:
+                oc.execute(
+                    """
+                    SELECT id, order_number, accession_number, patient_name,
+                           modality, status, created_at
+                    FROM orders
+                    WHERE (accession_number = %s OR order_number = %s)
+                      AND status != 'DELETED'
+                    """,
+                    (identifier, identifier),
+                )
+
+            order = oc.fetchone()
+            if not order:
+                return jsonify({"status": "error", "message": "Order not found"}), 404
+
+            order_id = str(order["id"])
+            order["id"] = order_id
+
+            fc = conn.cursor(cursor_factory=RealDictCursor)
+            fc.execute(
+                """
+                SELECT
+                    id,
+                    filename,
+                    file_type,
+                    category,
+                    size_bytes,
+                    storage_path,
+                    checksum_sha256,
+                    metadata,
+                    created_at,
+                    created_by,
+                    source
+                FROM order_files
+                WHERE order_id = %s
+                ORDER BY created_at ASC, id ASC
+                """,
+                (order_id,),
+            )
+            files = fc.fetchall() or []
+            for f in files:
+                f["id"] = str(f["id"])
+
+            return jsonify({
+                "status": "success",
+                "order": order,
+                "files": files,
+            }), 200
+
+    except Exception as e:
+        logger.error(f"Error getting order files for {identifier}: {str(e)}", exc_info=True)
+        return jsonify({
+            "status": "error",
+            "message": "Failed to get order files",
+            "detail": str(e),
+        }), 500
+
+
+@app.route('/orders/<identifier>/files', methods=['POST'])
+def add_order_file(identifier):
+    """
+    Attach a file to an order.
+
+    Supports:
+    - multipart/form-data:
+        - file (required)
+        - category (optional)
+        - metadata (optional, JSON string)
+    - application/json (backward-compatible metadata-only):
+        - filename, file_type, etc.
+
+    Auth & permission:
+    - Enforced by API Gateway (order:create or * by default).
+    """
+    try:
+        # 1) Resolve target order (shared for both modes)
+        with get_db_connection() as conn:
+            oc = conn.cursor(cursor_factory=RealDictCursor)
+            try:
+                uuid_obj = uuid.UUID(identifier)
+                oc.execute(
+                    """
+                    SELECT id, accession_number
+                    FROM orders
+                    WHERE id = %s AND status != 'DELETED'
+                    """,
+                    (str(uuid_obj),),
+                )
+            except ValueError:
+                oc.execute(
+                    """
+                    SELECT id, accession_number
+                    FROM orders
+                    WHERE (accession_number = %s OR order_number = %s)
+                      AND status != 'DELETED'
+                    """,
+                    (identifier, identifier),
+                )
+
+            order = oc.fetchone()
+            if not order:
+                return jsonify({"status": "error", "message": "Order not found"}), 404
+
+            order_id = str(order["id"])
+            acc_no = order.get("accession_number")
+
+        # 2) Resolve actor/source once (outside DB context)
+        try:
+            actor_info = resolve_request_actor()
+        except Exception:
+            actor_info = {}
+        if not isinstance(actor_info, dict):
+            actor_info = {}
+
+        created_by = (
+            actor_info.get("username")
+            or actor_info.get("id")
+            or request.headers.get("X-User-ID")
+            or "system"
+        )
+        source = (
+            request.headers.get("X-Order-Source")
+            or actor_info.get("source")
+            or "api"
+        )
+
+        ct = (request.headers.get("Content-Type") or "").lower()
+
+        # 3) MULTIPART MODE: actual file upload
+        if ct.startswith("multipart/form-data"):
+            upload = request.files.get("file")
+            if not upload:
+                logger.warning("Multipart upload received without 'file' field")
+                return jsonify({
+                    "status": "error",
+                    "message": "Missing file field in multipart/form-data (expected name='file')"
+                }), 400
+
+            # Optional fields from form
+            category = (request.form.get("category") or "other").strip() or "other"
+            raw_metadata = request.form.get("metadata")
+            metadata = {}
+            if raw_metadata:
+                try:
+                    metadata = json.loads(raw_metadata)
+                    if not isinstance(metadata, dict):
+                        metadata = {"_value": metadata}
+                except Exception:
+                    # Keep raw string if not valid JSON
+                    metadata = {"_raw": raw_metadata}
+
+            # Jika mimetype menunjukkan DICOM dan category masih generic, set ke 'dicom' untuk konsistensi
+            try:
+                if "dicom" in (file_type or "").lower() and category.lower() in ("other", "", "file", "image"):
+                    logger.info(
+                        f"[order-files] Auto-adjust category to 'dicom' for DICOM upload "
+                        f"(was '{category}')"
+                    )
+                    category = "dicom"
+            except Exception as cat_err:
+                logger.warning(f"[order-files] Failed to normalize DICOM category: {cat_err}")
+
+            # Prefer explicit filename from form if provided (as in some clients)
+            form_filename = (request.form.get("filename") or "").strip()
+            original_filename = form_filename or (upload.filename or "file")
+
+            # Prefer explicit file_type from form; fall back to mimetype or safe default
+            file_type = (
+                (request.form.get("file_type") or "").strip()
+                or upload.mimetype
+                or "application/octet-stream"
+            )
+
+            # Normalize DICOM filename: ensure .dcm extension if detected as DICOM
+            try:
+                lower_name = (original_filename or "").lower()
+                is_dicom_ext = lower_name.endswith(".dcm") or lower_name.endswith(".dicom")
+                is_dicom_mime = "dicom" in (file_type or "").lower()
+                form_category = (request.form.get("category") or "").strip().lower()
+                is_dicom_category = form_category in ("dicom", "imaging", "image")  # heuristik ringan
+
+                if (is_dicom_ext or is_dicom_mime or is_dicom_category) and not lower_name.endswith(".dcm"):
+                    # Tambahkan .dcm jika belum ada suffix .dcm
+                    original_filename = original_filename + ".dcm"
+                    logger.info(
+                        f"[order-files] Normalized DICOM filename to ensure .dcm extension: {original_filename}"
+                    )
+            except Exception as norm_err:
+                logger.warning(f"[order-files] Failed to normalize DICOM filename: {norm_err}")
+
+            # Optional: size_bytes hint (not required, we still compute actual size)
+            try:
+                hinted_size = int(request.form.get("size_bytes")) if request.form.get("size_bytes") else None
+            except (TypeError, ValueError):
+                hinted_size = None
+
+            logger.info(
+                f"[order-files] multipart upload: order_id={order_id}, "
+                f"filename={original_filename!r}, file_type={file_type!r}, "
+                f"category={category!r}, hinted_size={hinted_size}, "
+                f"created_by={created_by}, source={source}"
+            )
+
+            # Generate file_id now so we can use it as filename on disk
+            file_id = str(uuid.uuid4())
+
+            # Build storage path: {ROOT}/{order_id}/{file_id}
+            storage_root = ORDER_FILES_STORAGE_ROOT.rstrip("/")
+            order_dir = os.path.join(storage_root, order_id)
+            os.makedirs(order_dir, exist_ok=True)
+            storage_path = os.path.join(order_dir, file_id)
+
+            # Save file to disk and compute size/checksum
+            import hashlib
+
+            sha256 = hashlib.sha256()
+            size_bytes = 0
+            # Save streamed to avoid high memory use
+            with open(storage_path, "wb") as f:
+                # werkzeug FileStorage supports iterating via .stream
+                chunk = upload.stream.read(8192)
+                while chunk:
+                    size_bytes += len(chunk)
+                    sha256.update(chunk)
+                    f.write(chunk)
+                    chunk = upload.stream.read(8192)
+
+            checksum_sha256 = sha256.hexdigest()
+
+            # Insert metadata row
+            with get_db_connection() as conn:
+                fc = conn.cursor(cursor_factory=RealDictCursor)
+                fc.execute(
+                    """
+                    INSERT INTO order_files (
+                        id,
+                        order_id,
+                        accession_number,
+                        filename,
+                        file_type,
+                        category,
+                        size_bytes,
+                        storage_path,
+                        checksum_sha256,
+                        metadata,
+                        created_by,
+                        source
+                    )
+                    VALUES (
+                        %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+                    )
+                    RETURNING
+                        id,
+                        filename,
+                        file_type,
+                        category,
+                        size_bytes,
+                        storage_path,
+                        checksum_sha256,
+                        metadata,
+                        created_at,
+                        created_by,
+                        source
+                    """,
+                    (
+                        file_id,
+                        order_id,
+                        acc_no,
+                        original_filename,
+                        file_type,
+                        category,
+                        size_bytes,
+                        storage_path,
+                        checksum_sha256,
+                        Json(metadata),
+                        created_by,
+                        source,
+                    ),
+                )
+                rec = fc.fetchone()
+                rec["id"] = str(rec["id"])
+
+            return jsonify({
+                "status": "success",
+                "file": rec
+            }), 201
+
+        # 4) JSON MODE: backward-compatible metadata-only
+        body = request.get_json(silent=True) or {}
+
+        filename = (body.get("filename") or "").strip()
+        file_type = (body.get("file_type") or body.get("type") or "").strip()
+        category = (body.get("category") or "other").strip() or "other"
+
+        if not filename or not file_type:
+            return jsonify({
+                "status": "error",
+                "message": "filename and file_type are required"
+            }), 400
+
+        size_bytes = body.get("size_bytes") or body.get("size")
+        storage_path = body.get("storage_path") or body.get("path")
+        checksum_sha256 = body.get("checksum_sha256") or body.get("checksum")
+        metadata = body.get("metadata") or {}
+
+        with get_db_connection() as conn:
+            fc = conn.cursor(cursor_factory=RealDictCursor)
+            fc.execute(
+                """
+                INSERT INTO order_files (
+                    order_id,
+                    accession_number,
+                    filename,
+                    file_type,
+                    category,
+                    size_bytes,
+                    storage_path,
+                    checksum_sha256,
+                    metadata,
+                    created_by,
+                    source
+                )
+                VALUES (
+                    %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+                )
+                RETURNING
+                    id,
+                    filename,
+                    file_type,
+                    category,
+                    size_bytes,
+                    storage_path,
+                    checksum_sha256,
+                    metadata,
+                    created_at,
+                    created_by,
+                    source
+                """,
+                (
+                    order_id,
+                    acc_no,
+                    filename,
+                    file_type,
+                    category,
+                    size_bytes,
+                    storage_path,
+                    checksum_sha256,
+                    Json(metadata),
+                    created_by,
+                    source,
+                ),
+            )
+            rec = fc.fetchone()
+            rec["id"] = str(rec["id"])
+
+        rec["id"] = str(rec["id"])
+        return jsonify({
+            "status": "success",
+            "file": rec
+        }), 201
+
+    except Exception as e:
+        logger.error(f"Error adding file for order {identifier}: {str(e)}", exc_info=True)
+        return jsonify({
+            "status": "error",
+            "message": "Failed to add order file",
+            "detail": str(e)
+        }), 500
+
+
+@app.route('/orders/<identifier>/files/<file_id>', methods=['DELETE'])
+def delete_order_file(identifier, file_id):
+    """
+    Delete a file metadata record from an order.
+
+    NOTE:
+    - Auth & permission di-enforce oleh API Gateway:
+        - DELETE /orders/<id>/files/<file_id> -> requires order:delete atau *
+    - Hanya menghapus metadata di order_files, tidak otomatis menghapus file fisik.
+    """
+    try:
+        with get_db_connection() as conn:
+            oc = conn.cursor(cursor_factory=RealDictCursor)
+
+            # 1) Resolve order
+            try:
+                uuid_obj = uuid.UUID(identifier)
+                oc.execute(
+                    """
+                    SELECT id
+                    FROM orders
+                    WHERE id = %s AND status != 'DELETED'
+                    """,
+                    (str(uuid_obj),),
+                )
+            except ValueError:
+                oc.execute(
+                    """
+                    SELECT id
+                    FROM orders
+                    WHERE (accession_number = %s OR order_number = %s)
+                      AND status != 'DELETED'
+                    """,
+                    (identifier, identifier),
+                )
+
+            order = oc.fetchone()
+            if not order:
+                return jsonify({"status": "error", "message": "Order not found"}), 404
+
+            order_id = str(order["id"])
+
+            # 2) Ensure file belongs to this order and delete
+            fc = conn.cursor(cursor_factory=RealDictCursor)
+            try:
+                file_uuid = uuid.UUID(file_id)
+            except ValueError:
+                return jsonify({"status": "error", "message": "Invalid file_id"}), 400
+
+            fc.execute(
+                """
+                SELECT id
+                FROM order_files
+                WHERE id = %s AND order_id = %s
+                """,
+                (str(file_uuid), order_id),
+            )
+            existing = fc.fetchone()
+            if not existing:
+                return jsonify({
+                    "status": "error",
+                    "message": "File not found for this order"
+                }), 404
+
+            fc.execute(
+                "DELETE FROM order_files WHERE id = %s",
+                (str(file_uuid),),
+            )
+
+            return jsonify({
+                "status": "success",
+                "message": "Order file deleted",
+                "file_id": str(file_uuid),
+                "order_id": order_id
+            }), 200
+
+    except Exception as e:
+        logger.error(f"Error deleting file {file_id} for order {identifier}: {str(e)}", exc_info=True)
+        return jsonify({
+            "status": "error",
+            "message": "Failed to delete order file",
+            "detail": str(e)
+        }), 500
+
+
+@app.route('/orders/<identifier>/files/<file_id>/content', methods=['GET'])
+def download_order_file(identifier, file_id):
+    """
+    Download/stream the physical file content for a specific order file.
+
+    Identifier:
+      - UUID id, accession_number, or order_number for the order.
+
+    Behavior:
+      - Validates that the order exists and is not DELETED.
+      - Validates that the file_id is a valid UUID and belongs to that order.
+      - Reads file from storage_path on disk.
+      - Returns file bytes with appropriate Content-Type and filename.
+
+    Auth:
+      - Enforced by API Gateway (order:read or *).
+    """
+    try:
+        # 1) Resolve order
+        with get_db_connection() as conn:
+            oc = conn.cursor(cursor_factory=RealDictCursor)
+            try:
+                uuid_obj = uuid.UUID(identifier)
+                oc.execute(
+                    """
+                    SELECT id
+                    FROM orders
+                    WHERE id = %s AND status != 'DELETED'
+                    """,
+                    (str(uuid_obj),),
+                )
+            except ValueError:
+                oc.execute(
+                    """
+                    SELECT id
+                    FROM orders
+                    WHERE (accession_number = %s OR order_number = %s)
+                      AND status != 'DELETED'
+                    """,
+                    (identifier, identifier),
+                )
+
+            order = oc.fetchone()
+            if not order:
+                return jsonify({"status": "error", "message": "Order not found"}), 404
+
+            order_id = str(order["id"])
+
+            # 2) Validate file_id and load file metadata
+            try:
+                file_uuid = uuid.UUID(file_id)
+            except ValueError:
+                return jsonify({"status": "error", "message": "Invalid file_id"}), 400
+
+            fc = conn.cursor(cursor_factory=RealDictCursor)
+            fc.execute(
+                """
+                SELECT
+                    id,
+                    filename,
+                    file_type,
+                    storage_path,
+                    size_bytes
+                FROM order_files
+                WHERE id = %s AND order_id = %s
+                """,
+                (str(file_uuid), order_id),
+            )
+            f = fc.fetchone()
+            if not f:
+                return jsonify({
+                    "status": "error",
+                    "message": "File not found for this order"
+                }), 404
+
+        storage_path = f.get("storage_path")
+        if not storage_path:
+            return jsonify({
+                "status": "error",
+                "message": "No storage_path recorded for this file (metadata-only entry)"
+            }), 404
+
+        # 3) Read file from disk and stream to client
+        if not os.path.isfile(storage_path):
+            return jsonify({
+                "status": "error",
+                "message": "File not found on server storage"
+            }), 404
+
+        filename = f.get("filename") or file_id
+        mimetype = f.get("file_type") or "application/octet-stream"
+
+        # Use send_file to stream content; as_attachment=False for inline display by default.
+        # Clients can inspect headers to decide download vs preview.
+        return send_file(
+            storage_path,
+            mimetype=mimetype,
+            as_attachment=False,
+            download_name=filename
+        )
+
+    except Exception as e:
+        logger.error(f"Error downloading file {file_id} for order {identifier}: {str(e)}", exc_info=True)
+        return jsonify({
+            "status": "error",
+            "message": "Failed to download order file",
+            "detail": str(e)
+        }), 500
+
+
+if __name__ == '__main__':
+    # Ensure log directory exists
+    os.makedirs('/var/log/orders', exist_ok=True)
+
+    try:
+        # Wait until database is reachable
+        wait_for_database()
+    except Exception as e:
+        logger.critical(f"FATAL: Database readiness check failed: {e}", exc_info=True)
+        sys.exit(1)
+
+    try:
+        # Run migrations / schema alignment
+        init_database()
+        logger.info("Order management service initialized")
+    except Exception as e:
+        logger.critical(f"FATAL: Database initialization failed: {e}", exc_info=True)
+        logger.critical("The service will now exit.")
+        sys.exit(1)
+
+    logger.info("=" * 80)
+    logger.info("Order Management Service starting...")
+    logger.info("Features:")
+    logger.info("  - Auto Accession Number generation")
+    logger.info("  - Order data persistence")
+    logger.info("  - SATUSEHAT integration")
+    logger.info("  - MWL Worklist creation")
+    logger.info("  - Complete flow automation")
+    logger.info("  - Order files upload/download (DICOM, docs, etc.)")
+    logger.info("=" * 80)
+
+    app.run(host='0.0.0.0', port=8001, debug=False)

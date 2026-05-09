@@ -1,0 +1,8 @@
+# Apple Touch Icon
+# 
+# This is a placeholder file. Replace with actual PNG image generated from base-icon.svg
+# Required size: 180x180 pixels
+# Format: PNG without transparency (iOS requirement)
+# Purpose: iOS home screen icon when app is added to home screen
+#
+# To generate: node generate-icons.js (requires sharp package)

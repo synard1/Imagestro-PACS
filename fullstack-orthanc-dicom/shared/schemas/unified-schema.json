@@ -1,0 +1,154 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://schemas.kemkes.go.id/dicom/unified-order-schema/v1.0.0",
+  "title": "Unified DICOM Order Schema",
+  "description": "Unified schema for DICOM order management and accession API with SATUSEHAT compliance",
+  "version": "1.0.0",
+  "type": "object",
+  "required": [
+    "modality",
+    "procedure_code", 
+    "procedure_name",
+    "scheduled_at",
+    "patient_national_id",
+    "patient_name",
+    "gender",
+    "birth_date",
+    "medical_record_number",
+    "ihs_number"
+  ],
+  "properties": {
+    "modality": {
+      "type": "string",
+      "description": "DICOM modality type",
+      "enum": ["CT", "MR", "CR", "DX", "US", "XA", "RF", "MG", "NM", "PT"],
+      "examples": ["CT", "MR", "US"]
+    },
+    "procedure_code": {
+      "type": "string",
+      "description": "Procedure code identifier",
+      "pattern": "^[A-Z0-9_-]+$",
+      "minLength": 3,
+      "maxLength": 20,
+      "examples": ["CTABDOMEN", "MRBRAIN", "USABDOMEN"]
+    },
+    "procedure_name": {
+      "type": "string", 
+      "description": "Human readable procedure name",
+      "minLength": 5,
+      "maxLength": 200,
+      "examples": ["CT Abdomen with Contrast", "MR Brain without Contrast"]
+    },
+    "scheduled_at": {
+      "type": "string",
+      "description": "Scheduled datetime in ISO 8601 format",
+      "format": "date-time",
+      "examples": ["2025-10-22T09:30:00Z", "2025-10-23T14:15:00+07:00"]
+    },
+    "patient_national_id": {
+      "type": "string",
+      "description": "Indonesian National ID (NIK) - 16 digits",
+      "pattern": "^\\d{16}$",
+      "examples": ["1234567890123456"]
+    },
+    "patient_name": {
+      "type": "string",
+      "description": "Patient full name",
+      "minLength": 2,
+      "maxLength": 200,
+      "examples": ["John Doe", "Siti Nurhaliza"]
+    },
+    "gender": {
+      "type": "string",
+      "description": "Patient gender following FHIR standard",
+      "enum": ["male", "female", "other", "unknown"],
+      "examples": ["male", "female"]
+    },
+    "birth_date": {
+      "type": "string",
+      "description": "Patient birth date in YYYY-MM-DD format",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "format": "date",
+      "examples": ["1990-01-15", "1985-12-25"]
+    },
+    "medical_record_number": {
+      "type": "string",
+      "description": "Medical record number",
+      "pattern": "^[a-zA-Z0-9\\-_]+$",
+      "minLength": 1,
+      "maxLength": 50,
+      "examples": ["MRN123456", "12345678"]
+    },
+    "ihs_number": {
+      "type": "string",
+      "description": "IHS Number for SATUSEHAT - P followed by 11 digits",
+      "pattern": "^P\\d{11}$",
+      "examples": ["P02478375538", "P12345678901"]
+    },
+    "priority": {
+      "type": "string",
+      "description": "Order priority level",
+      "enum": ["routine", "urgent", "stat", "asap"],
+      "default": "routine"
+    },
+    "clinical_indication": {
+      "type": "string",
+      "description": "Clinical indication for the procedure",
+      "maxLength": 1000
+    },
+    "ordering_physician_name": {
+      "type": "string",
+      "description": "Name of ordering physician",
+      "maxLength": 200
+    },
+    "performing_physician_name": {
+      "type": "string",
+      "description": "Name of performing physician", 
+      "maxLength": 200
+    },
+    "patient_phone": {
+      "type": "string",
+      "description": "Patient phone number",
+      "pattern": "^[+]?[0-9\\-\\s()]+$",
+      "maxLength": 20
+    },
+    "patient_address": {
+      "type": "string",
+      "description": "Patient address",
+      "maxLength": 500
+    },
+    "facility_code": {
+      "type": "string",
+      "description": "Healthcare facility code",
+      "pattern": "^[A-Z0-9]+$",
+      "maxLength": 10,
+      "default": "001"
+    },
+    "station_aet": {
+      "type": "string",
+      "description": "DICOM Application Entity Title",
+      "pattern": "^[A-Z0-9_]+$",
+      "maxLength": 16,
+      "default": "ORTHANC"
+    }
+  },
+  "additionalProperties": false,
+  "examples": [
+    {
+      "modality": "CT",
+      "procedure_code": "CTABDOMEN",
+      "procedure_name": "CT Abdomen with Contrast",
+      "scheduled_at": "2025-10-22T09:30:00Z",
+      "patient_national_id": "1234567890123456",
+      "patient_name": "John Doe",
+      "gender": "male",
+      "birth_date": "1990-01-01",
+      "medical_record_number": "12345678",
+      "ihs_number": "P02478375538",
+      "priority": "routine",
+      "clinical_indication": "Abdominal pain evaluation",
+      "ordering_physician_name": "Dr. Smith",
+      "facility_code": "001"
+    }
+  ]
+}

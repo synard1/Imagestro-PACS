@@ -1,0 +1,329 @@
+"""
+PACS Service Main Application with Enhanced Logging
+"""
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
+import logging
+import sys
+
+from app.database import check_db_connection, test_db_operations
+from app.config import settings
+from fastapi_cache import FastAPICache
+from fastapi_cache.backends.redis import RedisBackend
+
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler('/var/log/pacs/app.log')
+    ]
+)
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan with enhanced logging"""
+    # Startup
+    logger.info("=" * 80)
+    logger.info("PACS Service Starting...")
+    logger.info("=" * 80)
+    logger.info(f"Version: {settings.app_version}")
+    logger.info(f"Environment: {'Development' if settings.debug else 'Production'}")
+    logger.info(f"API Prefix: {settings.api_prefix}")
+    logger.info(f"Debug Mode: {settings.debug}")
+    logger.info("=" * 80)
+
+    # Check database connection
+    logger.info("Initializing database connection...")
+    if check_db_connection():
+        logger.info("✓ Database connection established")
+
+        # Test database operations
+        if test_db_operations():
+            logger.info("✓ Database operations test passed")
+        else:
+            logger.warning("⚠ Database operations test failed (non-critical)")
+    else:
+        logger.error("✗ Database connection failed")
+        logger.error("Service will start but database operations will fail")
+
+    # Initialize FastAPI Cache with Redis backend
+    try:
+        import os
+        redis_url = str(os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0'))
+        FastAPICache.init(RedisBackend(redis_url), prefix="fastapi-cache")
+        logger.info("✓ FastAPI Cache initialized with Redis")
+    except Exception as e:
+        logger.error(f"✗ Failed to initialize FastAPI Cache: {e}")
+
+    # Check AI Service Status
+    try:
+        from app.services.ai_service import AIService
+        ai_status = AIService.get_status()
+        if ai_status["ready"]:
+            logger.info(f"✓ AI Service Ready: {ai_status['details']}")
+        else:
+            logger.warning(f"⚠ AI Service Not Ready: {ai_status['details']}")
+    except Exception as e:
+        logger.error(f"✗ Failed to check AI Service status: {e}")
+
+    logger.info("=" * 80)
+    logger.info("PACS Service Ready")
+    logger.info("=" * 80)
+    logger.info(f"API Documentation: http://localhost:8003{settings.api_prefix}/docs")
+    logger.info(f"Health Check: http://localhost:8003{settings.api_prefix}/health")
+    logger.info("=" * 80)
+
+    yield
+
+    # Shutdown
+    logger.info("=" * 80)
+    logger.info("PACS Service Shutting Down...")
+    logger.info("=" * 80)
+
+
+# Create FastAPI application
+app = FastAPI(
+    title=settings.app_name,
+    description="PACS Service - Medical Image Management System",
+    version=settings.app_version,
+    lifespan=lifespan,
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+    openapi_url="/api/openapi.json"
+)
+
+
+# ============================================================================
+# Middleware Configuration
+# ============================================================================
+
+# Add Rate Limiting Middleware (FIRST - to protect against abuse)
+from app.middleware.rate_limit import RateLimitMiddleware
+import os
+app.add_middleware(
+    RateLimitMiddleware,
+    redis_url=os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0'),
+    enabled=True
+)
+logger.info("✓ Rate Limiting Middleware configured - protecting API endpoints")
+
+# Add CSRF Protection Middleware (SECOND - to prevent CSRF attacks)
+from app.middleware.csrf import CSRFMiddleware
+app.add_middleware(
+    CSRFMiddleware,
+    secret_key=settings.secret_key,
+    token_header="X-CSRF-Token",
+    exempt_paths=[
+        "/api/health",
+        "/api/docs",
+        "/api/redoc",
+        "/api/openapi.json",
+        "/api/csrf",  # CSRF token endpoint itself
+    ],
+    token_expiry=3600  # 1 hour
+)
+logger.info("✓ CSRF Protection Middleware configured - validating tokens for state-changing requests")
+
+from app.middleware.api_cache import CacheRoute
+
+# Set cache route handler for all API routers
+app.router.route_class = CacheRoute
+
+# Add Audit Context Middleware (THIRD - to capture all request context)
+from app.middleware.audit_context import AuditContextMiddleware
+app.add_middleware(AuditContextMiddleware)
+logger.info("✓ Audit Context Middleware configured - tracking user/request info for audit logs")
+logger.info("✓ API Response Caching Enabled (Redis)")
+
+# Configure CORS to allow frontend access
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",  # Vite dev server
+        "http://localhost:5174",  # Vite dev server (new)
+        "http://localhost:3000",  # Alternative dev server
+        "http://localhost:8080",  # Alternative dev server
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",  # Vite dev server (new)
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:8080",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all methods (GET, POST, PUT, DELETE, etc.)
+    allow_headers=["*"],  # Allow all headers
+)
+
+logger.info("✓ CORS middleware configured for frontend access")
+
+# Add GZIP Compression Middleware (compresses responses >1KB)
+from starlette.middleware.gzip import GZipMiddleware
+app.add_middleware(
+    GZipMiddleware,
+    minimum_size=1000  # Only compress responses larger than 1KB
+)
+logger.info("✓ GZIP Compression Middleware enabled - reduces bandwidth 50-90%")
+
+
+# ============================================================================
+# Health Check Endpoint
+# ============================================================================
+
+@app.get("/api/health", tags=["health"])
+async def health_check():
+    """
+    Health check endpoint
+    Returns the health status of the service
+    """
+    from app.database import engine
+    from sqlalchemy import text
+    from datetime import datetime
+
+    # Check database connection
+    db_healthy = False
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        db_healthy = True
+    except Exception as e:
+        logger.error(f"Database health check failed: {e}")
+
+    return {
+        "status": "healthy" if db_healthy else "unhealthy",
+        "service": settings.app_name,
+        "version": settings.app_version,
+        "database": "healthy" if db_healthy else "unhealthy",
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@app.get("/api", tags=["root"])
+async def root():
+    """Root endpoint"""
+    return {
+        "service": settings.app_name,
+        "version": settings.app_version,
+        "status": "running",
+        "docs": "/api/docs",
+        "health": "/api/health"
+    }
+
+
+# ============================================================================
+# Include API Routers
+# ============================================================================
+
+from app.api.reports import router as reports_router
+from app.api.studies import router as studies_router
+from app.api.storage import router as storage_router
+from app.api.storage_monitor import router as storage_monitor
+from app.api.signatures import router as signatures_router
+from app.api.integration import router as integration_router
+from app.api.wado import router as wado_router
+from app.api.worklist import router as worklist_router
+from app.api.dicom_upload import router as dicom_upload_router
+from app.api.dicom_upload_sync import router as dicom_upload_sync_router
+from app.api.measurements import router as measurements_router
+from app.api.dicomweb import router as dicomweb_router
+from app.api.audit import router as audit_router
+from app.api.storage_config import router as storage_config_router
+from app.api.bulk_operations import router as bulk_operations_router
+from app.api.metrics import router as metrics_router
+from app.api.cache_management import router as cache_management_router
+from app.api.thumbnail_api import router as thumbnail_api_router
+from app.api.batch import router as batch_router
+from app.api.khanza import router as khanza_router  # Khanza SIMRS Integration
+from app.api.external_systems import router as external_systems_router  # Unified External Systems Integration
+from app.api.reports_analytics import router as reports_analytics_router  # Comprehensive Reports Analytics
+from app.api.csrf import router as csrf_router  # CSRF Token Management
+from app.routers.monitoring import router as monitoring_router
+from app.routers.hl7 import router as hl7_router
+from app.routers.fhir import router as fhir_router
+from app.routers.notification_settings import router as notification_settings_router
+
+from app.routers.dicom_nodes import router as dicom_nodes_router
+from app.routers.dicom_query import router as dicom_query_router
+from app.routers.dicom_retrieve import router as dicom_retrieve_router
+from app.routers.dicom_router import router as dicom_router_router
+from app.routers.ml import router as ml_router  # NEW: ML Integration
+from app.api.impersonate import router as impersonate_router  # NEW: User Impersonate Feature
+from app.api.export import router as export_router  # NEW: Master Data Export Feature
+from app.api.hospitals import router as hospitals_router  # NEW: Hospitals Tenant Management
+
+# Include routers (they already have /api prefix in their router definitions)
+app.include_router(reports_router)
+app.include_router(studies_router)
+app.include_router(storage_router)
+app.include_router(signatures_router)
+app.include_router(integration_router)
+app.include_router(wado_router)
+app.include_router(worklist_router)
+app.include_router(dicom_upload_router)
+app.include_router(dicom_upload_sync_router)  # DICOM upload with tag synchronization
+app.include_router(measurements_router)
+app.include_router(dicom_nodes_router)
+app.include_router(dicom_query_router)
+app.include_router(dicom_retrieve_router)
+app.include_router(dicom_router_router)
+app.include_router(monitoring_router)
+
+# Phase 1 New Endpoints
+app.include_router(dicomweb_router)  # DICOMweb STOW-RS endpoint
+app.include_router(audit_router)  # Audit Trails API
+app.include_router(storage_config_router)  # Storage Configuration API
+
+# Phase 2 New Endpoints - Advanced Storage Features
+app.include_router(bulk_operations_router)  # Bulk Operations API (upload/download/migration)
+app.include_router(metrics_router)  # Prometheus Metrics & Monitoring
+
+# Phase 3 New Endpoints - Performance & Optimization
+app.include_router(cache_management_router)  # Cache Management API
+app.include_router(thumbnail_api_router)  # Thumbnail Generation & Retrieval
+app.include_router(batch_router)  # Batch API Requests (/api/batch)
+
+# NEW: ML/AI Integration Endpoints (Phase 9)
+app.include_router(ml_router)  # ML Analysis Proxy (/api/ml)
+
+# HL7 Integration Endpoints
+app.include_router(hl7_router)  # HL7 v2.x Integration (ADT, ORM, ORU)
+
+# FHIR Integration Endpoints
+app.include_router(fhir_router)  # FHIR R4 RESTful API (Patient, ServiceRequest, DiagnosticReport, Observation)
+
+# Notification Settings Endpoints
+app.include_router(notification_settings_router)  # Notification Configuration (Telegram, WhatsApp, Email)
+
+app.include_router(storage_monitor)  # Storage Monitoring Dashboard API
+
+# Khanza SIMRS Integration Endpoints
+app.include_router(khanza_router)  # SIMRS Khanza Integration (config, mappings, import)
+
+# Unified External Systems Integration Endpoints
+app.include_router(external_systems_router)  # Unified External Systems (SIMRS, HIS, RIS, PACS, LIS, EMR)
+
+# Comprehensive Reports Analytics Endpoints
+app.include_router(reports_analytics_router)  # Reports Dashboard, Registration, Modality, SATUSEHAT, Worklist, Storage, Productivity, Audit
+
+# NEW: Master Data Export Endpoints
+app.include_router(export_router)
+
+# User Impersonate Feature Endpoints
+app.include_router(impersonate_router, prefix="/api/impersonate")  # User Impersonate (start, stop, status, history)
+
+# NEW: Hospitals Tenant Management Endpoints
+app.include_router(hospitals_router)  # SaaS Tenant CRUD
+
+# NEW: AI Router (Smart PACS Features)
+from app.routers.ai import router as ai_router
+app.include_router(ai_router)
+
+# CSRF Token Management Endpoints
+app.include_router(csrf_router)  # CSRF Token Generation and Validation
+
+logger.info("✓ All API routers registered including ML integration, cache, thumbnails, rate limiting, CSRF protection, Khanza SIMRS integration, Unified External Systems, Reports Analytics, Notification Settings, and User Impersonate")

@@ -1,0 +1,1260 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SIMRS Radiology Order Simulator</title>
+  <style>
+    :root {
+      --bg-primary: #0a0e27;
+      --bg-secondary: #141b3d;
+      --bg-card: #1a2447;
+      --bg-card-hover: #202d57;
+      --accent-primary: #4e8cff;
+      --accent-secondary: #6ba3ff;
+      --accent-gradient: linear-gradient(135deg, #4e8cff 0%, #6ba3ff 100%);
+      --success: #2ecc71;
+      --warning: #f39c12;
+      --error: #e74c3c;
+      --text-primary: #eaf0ff;
+      --text-secondary: #98a1c0;
+      --text-muted: #6b7496;
+      --border-color: #2a3455;
+      --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.2);
+      --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.3);
+      --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.4);
+      --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    /* Header Modern */
+    .app-header {
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border-color);
+      box-shadow: var(--shadow-md);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      backdrop-filter: blur(10px);
+    }
+
+    .header-content {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 20px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+    }
+
+    .header-left {
+      flex: 1;
+    }
+
+    .app-header h1 {
+      font-size: 24px;
+      font-weight: 700;
+      background: var(--accent-gradient);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 4px;
+    }
+
+    .subtitle {
+      color: var(--text-secondary);
+      font-size: 14px;
+      font-weight: 400;
+    }
+
+    .header-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      background: var(--bg-card);
+      border-radius: 12px;
+      font-size: 13px;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--success);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+
+      0%,
+      100% {
+        opacity: 1;
+      }
+
+      50% {
+        opacity: 0.5;
+      }
+    }
+
+    /* Container */
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    /* Card Modern */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      padding: 24px;
+      margin-bottom: 24px;
+      box-shadow: var(--shadow-sm);
+      transition: var(--transition);
+    }
+
+    .card:hover {
+      box-shadow: var(--shadow-md);
+      transform: translateY(-2px);
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .card-title {
+      font-size: 20px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .card-icon {
+      width: 32px;
+      height: 32px;
+      background: var(--accent-gradient);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+    }
+
+    /* Form Elements */
+    .form-group {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    label {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-secondary);
+    }
+
+    input,
+    select,
+    textarea {
+      width: 100%;
+      padding: 12px 16px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      color: var(--text-primary);
+      font-size: 14px;
+      transition: var(--transition);
+    }
+
+    input:focus,
+    select:focus,
+    textarea:focus {
+      outline: none;
+      border-color: var(--accent-primary);
+      box-shadow: 0 0 0 3px rgba(78, 140, 255, 0.1);
+    }
+
+    textarea {
+      min-height: 100px;
+      resize: vertical;
+    }
+
+    /* Buttons Modern */
+    .btn {
+      padding: 12px 24px;
+      border: none;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: var(--transition);
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+
+    .btn-primary {
+      background: var(--accent-gradient);
+      color: white;
+      box-shadow: 0 4px 12px rgba(78, 140, 255, 0.3);
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 16px rgba(78, 140, 255, 0.4);
+    }
+
+    .btn-secondary {
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      border: 1px solid var(--border-color);
+    }
+
+    .btn-secondary:hover {
+      background: var(--bg-card-hover);
+    }
+
+    .btn-success {
+      background: var(--success);
+      color: white;
+    }
+
+    .btn-danger {
+      background: var(--error);
+      color: white;
+    }
+
+    .btn-outline {
+      background: transparent;
+      border: 1px solid var(--accent-primary);
+      color: var(--accent-primary);
+    }
+
+    .btn-outline:hover {
+      background: rgba(78, 140, 255, 0.1);
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none !important;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 20px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border-color);
+    }
+
+    /* Table Modern */
+    .table-container {
+      background: var(--bg-secondary);
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid var(--border-color);
+    }
+
+    .table-responsive {
+      overflow-x: auto;
+      max-height: 600px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th,
+    td {
+      padding: 16px;
+      text-align: left;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    th {
+      background: var(--bg-card);
+      font-weight: 600;
+      font-size: 13px;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    tbody tr {
+      transition: var(--transition);
+    }
+
+    tbody tr:hover {
+      background: var(--bg-card-hover);
+    }
+
+    td {
+      font-size: 14px;
+    }
+
+    /* Badge */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .badge.ok {
+      background: rgba(46, 204, 113, 0.15);
+      color: var(--success);
+      border: 1px solid rgba(46, 204, 113, 0.3);
+    }
+
+    .badge.warn {
+      background: rgba(243, 156, 18, 0.15);
+      color: var(--warning);
+      border: 1px solid rgba(243, 156, 18, 0.3);
+    }
+
+    /* Modal Modern */
+    .modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(4px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      animation: fadeIn 0.2s ease;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+      }
+
+      to {
+        opacity: 1;
+      }
+    }
+
+    .modal-content {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      padding: 32px;
+      max-width: 90%;
+      max-height: 90vh;
+      overflow-y: auto;
+      box-shadow: var(--shadow-lg);
+      animation: slideUp 0.3s ease;
+    }
+
+    @keyframes slideUp {
+      from {
+        opacity: 0;
+        transform: translateY(20px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .modal-content.wide {
+      max-width: 1200px;
+    }
+
+    .modal-content h3 {
+      font-size: 24px;
+      margin-bottom: 24px;
+      color: var(--text-primary);
+    }
+
+    /* Toast Modern */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 16px 20px;
+      box-shadow: var(--shadow-lg);
+      min-width: 300px;
+      max-width: 500px;
+      animation: slideIn 0.3s ease;
+      z-index: 2000;
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateX(100%);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateX(0);
+      }
+    }
+
+    /* Code Block */
+    .code {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 16px;
+      overflow-x: auto;
+      font-family: 'Monaco', 'Menlo', monospace;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    /* Checkbox Custom */
+    .checkbox {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+    }
+
+    .checkbox input[type="checkbox"] {
+      width: 20px;
+      height: 20px;
+      cursor: pointer;
+      accent-color: var(--accent-primary);
+    }
+
+    /* Helper Text */
+    .helper {
+      color: var(--text-muted);
+      font-size: 12px;
+      margin-top: 4px;
+    }
+
+    /* Search Section */
+    .search-section {
+      background: var(--bg-secondary);
+      padding: 20px;
+      border-radius: 12px;
+      margin-bottom: 20px;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .header-content {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .form-group {
+        grid-template-columns: 1fr;
+      }
+
+      .actions {
+        flex-direction: column;
+      }
+
+      .btn {
+        width: 100%;
+        justify-content: center;
+      }
+
+      .card {
+        padding: 16px;
+      }
+
+      th,
+      td {
+        padding: 12px 8px;
+        font-size: 12px;
+      }
+    }
+
+    /* Loading Spinner */
+    .spinner {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    /* Utility Classes */
+    .hidden {
+      display: none !important;
+    }
+
+    /* Pastikan atribut HTML `hidden` selalu efektif meski ada aturan display pada elemen */
+    [hidden] {
+      display: none !important;
+    }
+
+    .text-center {
+      text-align: center;
+    }
+
+    .mt-4 {
+      margin-top: 16px;
+    }
+
+    .mb-4 {
+      margin-bottom: 16px;
+    }
+
+    /* Tabs (untuk section yang bisa di-collapse) */
+    .tab-section {
+      margin-bottom: 16px;
+    }
+
+    .tab-header {
+      cursor: pointer;
+      padding: 12px 16px;
+      background: var(--bg-secondary);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      transition: var(--transition);
+    }
+
+    .tab-header:hover {
+      background: var(--bg-card-hover);
+    }
+
+    .tab-content {
+      padding: 16px;
+      margin-top: 8px;
+    }
+
+    /* Status Indicator */
+    .status-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      background: var(--bg-secondary);
+      border-radius: 8px;
+      font-size: 13px;
+    }
+  </style>
+</head>
+
+<body>
+  <header class="app-header">
+    <div class="header-content">
+      <div class="header-left">
+        <h1>🏥 SIMRS Radiology Order Simulator</h1>
+        <p class="subtitle">Form simulasi order radiologi hingga pengiriman ke DICOM Router SatuSehat</p>
+      </div>
+      <div class="header-status">
+        <span class="status-dot"></span>
+        <span id="login-status">Belum Login</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- Login Section -->
+    <section class="card">
+      <div class="card-header">
+        <h2 class="card-title">
+          <span class="card-icon">🔐</span>
+          Login Gateway (RBAC)
+        </h2>
+      </div>
+      <form id="login-form">
+        <div class="form-group">
+          <label>
+            Username
+            <input id="username" type="text" placeholder="Masukkan username" autocomplete="username" />
+          </label>
+          <label>
+            Password
+            <input id="password" type="password" placeholder="Masukkan password" autocomplete="current-password" />
+          </label>
+        </div>
+        <div class="actions">
+          <button type="button" id="btn-login" class="btn btn-primary">
+            <span>🔑</span> Login
+          </button>
+        </div>
+        <p class="helper">Token akan disimpan lokal dan digunakan untuk setiap request ke gateway</p>
+      </form>
+    </section>
+
+    <!-- Order Form -->
+    <section class="card">
+      <div class="card-header">
+        <h2 class="card-title">
+          <span class="card-icon">📋</span>
+          Buat Order Radiologi
+        </h2>
+      </div>
+      <form id="order-form" autocomplete="on">
+        <input id="active_sim_order_id" type="hidden" />
+
+        <!-- Data Pasien -->
+        <div class="tab-section">
+          <div class="card" style="background: var(--bg-secondary);">
+            <h3 class="card-title" style="font-size: 16px; margin-bottom: 16px;">
+              <span>👤</span> Data Pasien
+            </h3>
+            <div class="form-group">
+              <label>
+                NIK Pasien
+                <input id="patient_national_id" maxlength="16" placeholder="Contoh: 3201234567890001" />
+              </label>
+              <label>
+                SATUSEHAT Patient ID
+                <input id="ihs_number" placeholder="Patient FHIR ID" />
+              </label>
+              <label>
+                Nama Pasien
+                <input id="patient_name" placeholder="Nama lengkap pasien" />
+              </label>
+              <label>
+                Jenis Kelamin
+                <select id="sex">
+                  <option value="male">Laki-laki</option>
+                  <option value="female">Perempuan</option>
+                </select>
+              </label>
+              <label>
+                Tanggal Lahir
+                <input id="birth_date" type="date" />
+              </label>
+              <label>
+                Medical Record Number (MRN)
+                <input id="mrn" list="mrnList" placeholder="MRN Pasien" />
+                <datalist id="mrnList"></datalist>
+              </label>
+            </div>
+            <div class="actions">
+              <button type="button" id="btn-search-patient" class="btn btn-secondary">
+                <span>🔍</span> Cari Patient
+              </button>
+              <button type="button" id="btn-apply-dummy" class="btn btn-outline">
+                <span>🎲</span> Gunakan Data Dummy
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Data Practitioner -->
+        <div class="tab-section">
+          <div class="card" style="background: var(--bg-secondary);">
+            <h3 class="card-title" style="font-size: 16px; margin-bottom: 16px;">
+              <span>👨‍⚕️</span> Data Practitioner (Opsional)
+            </h3>
+            <div class="form-group">
+              <label>
+                NIK Dokter
+                <input id="practitioner_nik" placeholder="Contoh: 3201234567890002" />
+              </label>
+              <label>
+                Nama Dokter
+                <input id="practitioner_name" placeholder="Nama lengkap dokter" />
+              </label>
+              <label>
+                SATUSEHAT Practitioner ID
+                <input id="satusehat_practitioner_id" placeholder="Practitioner FHIR ID" />
+              </label>
+            </div>
+            <div class="actions">
+              <button type="button" id="btn-search-practitioner" class="btn btn-secondary">
+                <span>🔍</span> Cari Practitioner
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Order Radiologi -->
+        <div class="tab-section">
+          <div class="card" style="background: var(--bg-secondary);">
+            <h3 class="card-title" style="font-size: 16px; margin-bottom: 16px;">
+              <span>🩻</span> Detail Order Radiologi
+            </h3>
+            <div class="form-group">
+              <label>
+                Modality
+                <input id="modality" placeholder="Contoh: CR, CT, MR" />
+              </label>
+              <label>
+                Kode LOINC
+                <input id="procedure_code" list="loincList" placeholder="Contoh: 24627-2" />
+                <datalist id="loincList"></datalist>
+              </label>
+              <label>
+                Nama Pemeriksaan
+                <input id="procedure_name" placeholder="Contoh: Chest X-ray" />
+              </label>
+              <label>
+                Tanggal Pendaftaran
+                <input id="registration_date" type="date" />
+              </label>
+              <label>
+                Jadwal Pemeriksaan
+                <input id="scheduled_at" type="datetime-local" />
+              </label>
+              <label>
+                Jenis Layanan
+                <select id="service_type">
+                  <option value="RJ">Rawat Jalan</option>
+                  <option value="RI">Rawat Inap</option>
+                  <option value="IGD">IGD</option>
+                </select>
+              </label>
+              <label>
+                No. Registrasi
+                <input id="registration_number" placeholder="Akan di-generate otomatis" />
+              </label>
+              <label>
+                SATUSEHAT Location ID
+                <input id="satusehat_location_id" placeholder="Location FHIR ID" />
+              </label>
+              <label>
+                SATUSEHAT Encounter ID
+                <input id="satusehat_encounter_id" placeholder="Encounter FHIR ID" />
+              </label>
+              <label style="grid-column: 1 / -1;">
+                Catatan Klinis
+                <textarea id="clinical_notes" placeholder="Masukkan catatan klinis (opsional)"></textarea>
+              </label>
+            </div>
+            <div class="actions">
+              <button type="button" id="btn-search-procedure" class="btn btn-secondary">
+                <span>📖</span> Pilih dari Katalog
+              </button>
+              <button type="button" id="btn-generate-enc" class="btn btn-primary">
+                <span>⚡</span> Generate Encounter ID
+              </button>
+              <button type="button" id="btn-search-enc" class="btn btn-secondary">
+                <span>🔍</span> Cari Encounter
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="form-group" style="margin-top: 20px;">
+          <label class="checkbox">
+            <input id="complete_flow" type="checkbox" />
+            <span>Jalankan complete-flow (kirim ke DICOM Router)</span>
+          </label>
+          <label>
+            Base URL Gateway
+            <input id="gateway_base" type="text" value="http://103.42.117.19:8888"
+              placeholder="http://103.42.117.19:8888" />
+            <small class="helper">Default: http://103.42.117.19:8888</small>
+          </label>
+        </div>
+
+        <div class="actions">
+          <button type="button" id="btn-save-order" class="btn btn-success">
+            <span>💾</span> Simpan Order
+          </button>
+          <button type="button" id="btn-preview" class="btn btn-primary">
+            <span>📤</span> Kirim Order
+          </button>
+          <button type="button" id="btn-print" class="btn btn-secondary">
+            <span>🖨️</span> Cetak Bukti
+          </button>
+        </div>
+      </form>
+    </section>
+
+    <!-- Service Request Section -->
+    <section class="card">
+      <div class="card-header">
+        <h2 class="card-title">
+          <span class="card-icon">📝</span>
+          Buat Service Request SatuSehat
+        </h2>
+      </div>
+      <form id="service-request-form">
+        <div class="form-group">
+          <label>
+            Patient ID (SatuSehat)
+            <input id="sr_patient_id" placeholder="Patient FHIR ID" required />
+          </label>
+          <label>
+            Encounter ID (SatuSehat)
+            <input id="sr_encounter_id" placeholder="Encounter FHIR ID" required />
+          </label>
+          <label>
+            Practitioner ID (SatuSehat)
+            <input id="sr_practitioner_id" placeholder="Practitioner FHIR ID" required />
+          </label>
+          <label>
+            Location ID (SatuSehat)
+            <input id="sr_location_id" placeholder="Location FHIR ID" required />
+          </label>
+          <label>
+            Procedure Code
+            <input id="sr_code" placeholder="Contoh: 24627-2" required />
+          </label>
+          <label>
+            Procedure Display
+            <input id="sr_code_display" placeholder="Contoh: Chest X-ray" required />
+          </label>
+          <label>
+            Category Code
+            <input id="sr_category_code" value="394914008" />
+          </label>
+          <label>
+            Category Display
+            <input id="sr_category_display" value="Radiology" />
+          </label>
+          <label>
+            Priority
+            <select id="sr_priority">
+              <option value="routine">Routine</option>
+              <option value="urgent">Urgent</option>
+              <option value="asap">ASAP</option>
+              <option value="stat">STAT</option>
+            </select>
+          </label>
+          <label>
+            Intent
+            <select id="sr_intent">
+              <option value="order">Order</option>
+              <option value="plan">Plan</option>
+              <option value="proposal">Proposal</option>
+            </select>
+          </label>
+          <label>
+            Status
+            <select id="sr_status">
+              <option value="active">Active</option>
+              <option value="draft">Draft</option>
+              <option value="on-hold">On Hold</option>
+              <option value="revoked">Revoked</option>
+              <option value="completed">Completed</option>
+            </select>
+          </label>
+          <label>
+            Authored On
+            <input id="sr_authored_on" type="datetime-local" />
+          </label>
+          <label>
+            Reason Code
+            <input id="sr_reason_code" placeholder="Optional reason code" />
+          </label>
+          <label>
+            Reason Display
+            <input id="sr_reason_display" placeholder="Optional reason display" />
+          </label>
+          <label style="grid-column: 1 / -1;">
+            Notes
+            <textarea id="sr_note" placeholder="Additional notes"></textarea>
+          </label>
+        </div>
+        <div class="actions">
+          <button type="button" id="btn-copy-from-order" class="btn btn-outline">
+            <span>📋</span> Copy dari Order
+          </button>
+          <button type="button" id="btn-create-service-request" class="btn btn-primary">
+            <span>✨</span> Buat Service Request
+          </button>
+        </div>
+      </form>
+    </section>
+
+    <!-- Result Section -->
+    <section class="card" id="result-card" hidden>
+      <div class="card-header">
+        <h2 class="card-title">
+          <span class="card-icon">📊</span>
+          Hasil Order
+        </h2>
+      </div>
+      <pre id="result-json" class="code"></pre>
+      <div class="actions">
+        <button id="btn-print-result" class="btn btn-secondary">
+          <span>🖨️</span> Cetak/Simpan Bukti Order
+        </button>
+      </div>
+    </section>
+
+    <!-- Orders List -->
+    <section class="card">
+      <div class="card-header">
+        <h2 class="card-title">
+          <span class="card-icon">📑</span>
+          Daftar Order Simulasi
+        </h2>
+        <button id="btn-load-orders" class="btn btn-primary">
+          <span>🔄</span> Muat Daftar Order
+        </button>
+      </div>
+      <div class="table-container">
+        <div class="table-responsive">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Dibuat</th>
+                <th>Nama</th>
+                <th>MRN</th>
+                <th>Dokter</th>
+                <th>IHS Dokter</th>
+                <th>Lokasi ID</th>
+                <th>Modality</th>
+                <th>LOINC</th>
+                <th>Jadwal</th>
+                <th>Reg No</th>
+                <th>Layanan</th>
+                <th>Status</th>
+                <th>Encounter</th>
+                <th>Service Request</th>
+                <th>DICOM</th>
+                <th>SatuSehat</th>
+                <th>Imaging Study ID</th>
+                <th>Aksi</th>
+              </tr>
+            </thead>
+            <tbody id="sim-orders-tbody">
+              <tr>
+                <td colspan="19" class="text-center">Klik "Muat Daftar Order" untuk memuat data</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Modal Preview -->
+  <div id="order-preview-modal" class="modal" hidden>
+    <div class="modal-content">
+      <h3>📋 Preview Data Order</h3>
+      <pre id="preview-json" class="code"></pre>
+      <div class="actions">
+        <button id="btn-confirm" class="btn btn-primary">
+          <span>✅</span> Konfirmasi & Kirim
+        </button>
+        <button id="btn-cancel" class="btn btn-secondary">
+          <span>❌</span> Batal
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Patient Search Modal -->
+  <div id="patient-search-modal" class="modal" hidden>
+    <div class="modal-content wide">
+      <h3>🔍 Cari Patient</h3>
+      <div class="search-section">
+        <div class="form-group">
+          <label>
+            NIK
+            <input id="patient_search_nik" placeholder="Contoh: 9270060312000001" />
+          </label>
+          <label>
+            SATUSEHAT Patient ID
+            <input id="patient_search_ihs" placeholder="Patient FHIR ID" />
+          </label>
+          <label>
+            Nama
+            <input id="patient_search_name" placeholder="Nama pasien" />
+          </label>
+        </div>
+        <div class="actions">
+          <button id="btn-patient-search-run" class="btn btn-primary">
+            <span>🔍</span> Cari
+          </button>
+          <button onclick="(function(m){if(m){m.classList.add('hidden');m.setAttribute('hidden','');}})(document.querySelector('#patient-search-modal'))"
+            class="btn btn-secondary">
+            <span>❌</span> Tutup
+          </button>
+        </div>
+      </div>
+      <div class="table-container">
+        <div class="table-responsive">
+          <table>
+            <thead>
+              <tr>
+                <th>NIK</th>
+                <th>Nama</th>
+                <th>Gender</th>
+                <th>Tanggal Lahir</th>
+                <th>Patient ID</th>
+                <th>Satusehat ID</th>
+              </tr>
+            </thead>
+            <tbody id="patient-results">
+              <tr>
+                <td colspan="6" class="text-center">Klik tombol "Cari" untuk mencari patient</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <p class="helper" style="margin-top: 16px;">💡 Double click pada baris untuk memilih patient</p>
+    </div>
+  </div>
+
+  <!-- Practitioner Search Modal -->
+  <div id="practitioner-search-modal" class="modal" hidden>
+    <div class="modal-content wide">
+      <h3>🔍 Cari Practitioner</h3>
+      <div class="search-section">
+        <div class="form-group">
+          <label>
+            NIK
+            <input id="prac_search_nik" placeholder="Contoh: 7209061219000001" />
+          </label>
+          <label>
+            Nama
+            <input id="prac_search_name" placeholder="Nama practitioner" />
+          </label>
+        </div>
+        <div class="actions">
+          <button id="btn-prac-search-run" class="btn btn-primary">
+            <span>🔍</span> Cari
+          </button>
+          <button onclick="(function(m){if(m){m.classList.add('hidden');m.setAttribute('hidden','');}})(document.querySelector('#practitioner-search-modal'))"
+            class="btn btn-secondary">
+            <span>❌</span> Tutup
+          </button>
+        </div>
+      </div>
+      <div class="table-container">
+        <div class="table-responsive">
+          <table>
+            <thead>
+              <tr>
+                <th>NIK</th>
+                <th>Nama</th>
+                <th>Gender</th>
+                <th>Tanggal Lahir</th>
+                <th>Practitioner ID</th>
+                <th>Satusehat ID</th>
+              </tr>
+            </thead>
+            <tbody id="practitioner-results">
+              <tr>
+                <td colspan="6" class="text-center">Klik tombol "Cari" untuk mencari practitioner</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <p class="helper" style="margin-top: 16px;">💡 Double click pada baris untuk memilih practitioner</p>
+    </div>
+  </div>
+
+  <!-- Procedure Search Modal -->
+  <div id="procedure-modal" class="modal" hidden>
+    <div class="modal-content wide">
+      <h3>📖 Katalog Tindakan</h3>
+      <div class="actions" style="border: none; padding: 0; margin-bottom: 16px;">
+        <button onclick="(function(m){if(m){m.classList.add('hidden');m.setAttribute('hidden','');}})(document.querySelector('#procedure-modal'))" class="btn btn-secondary">
+          <span>❌</span> Tutup
+        </button>
+      </div>
+      <div class="table-container">
+        <div class="table-responsive">
+          <table>
+            <thead>
+              <tr>
+                <th>No</th>
+                <th>Nama</th>
+                <th>Tipe</th>
+                <th>Kode</th>
+                <th>Display</th>
+              </tr>
+            </thead>
+            <tbody id="procedure-results">
+              <tr>
+                <td colspan="5" class="text-center">Memuat katalog tindakan...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <p class="helper" style="margin-top: 16px;">💡 Double click pada baris untuk memilih tindakan</p>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- JavaScript Utama -->
+  <script src="/static/app.js"></script>
+
+  <script>
+    // Enhancement: Update modal visibility handling
+    document.addEventListener('DOMContentLoaded', () => {
+      // Override hidden attribute with class for better animation
+      const modals = document.querySelectorAll('.modal');
+      modals.forEach(modal => {
+        const observer = new MutationObserver((mutations) => {
+          mutations.forEach((mutation) => {
+            if (mutation.attributeName === 'hidden') {
+              if (modal.hasAttribute('hidden')) {
+                modal.classList.add('hidden');
+              } else {
+                modal.classList.remove('hidden');
+              }
+            }
+          });
+        });
+        observer.observe(modal, { attributes: true });
+      });
+
+      // Inisialisasi:
+      // 1) Jika kelas hidden dipakai tanpa atribut, tambahkan atribut.
+      // 2) Jika atribut hidden sudah ada tapi kelas belum, tambahkan kelas.
+      document.querySelectorAll('.modal').forEach(modal => {
+        if (modal.classList.contains('hidden') && !modal.hasAttribute('hidden')) {
+          modal.setAttribute('hidden', '');
+        }
+        if (modal.hasAttribute('hidden') && !modal.classList.contains('hidden')) {
+          modal.classList.add('hidden');
+        }
+      });
+      const rcInit = document.getElementById('result-card');
+      if (rcInit && rcInit.classList.contains('hidden') && !rcInit.hasAttribute('hidden')) {
+        rcInit.setAttribute('hidden', '');
+      }
+      if (rcInit && rcInit.hasAttribute('hidden') && !rcInit.classList.contains('hidden')) {
+        rcInit.classList.add('hidden');
+      }
+
+      // Update result card visibility
+      const resultCard = document.getElementById('result-card');
+      if (resultCard) {
+        const observer = new MutationObserver((mutations) => {
+          mutations.forEach((mutation) => {
+            if (mutation.attributeName === 'hidden') {
+              if (resultCard.hasAttribute('hidden')) {
+                resultCard.classList.add('hidden');
+              } else {
+                resultCard.classList.remove('hidden');
+              }
+            }
+          });
+        });
+        observer.observe(resultCard, { attributes: true });
+      }
+
+      // Enhance login status display (guard apabila fungsi asli tidak ada)
+      const loginStatus = document.getElementById('login-status');
+      const originalToast = window.toast;
+
+      window.toast = function (msg, type = 'info') {
+        if (typeof originalToast === 'function') {
+          originalToast(msg, type);
+        }
+
+        // Update login status ketika login sukses
+        if (typeof msg === 'string' && (msg.includes('Login berhasil') || msg.includes('Token tersedia'))) {
+          if (loginStatus) {
+            loginStatus.textContent = '✅ Login Berhasil';
+            loginStatus.style.color = 'var(--success)';
+          }
+        }
+      };
+
+      // Tambahkan smooth scroll ke result-card setelah submit (guard fungsi asli)
+      const originalSubmitOrder = window.submitOrder;
+      window.submitOrder = async function (e) {
+        if (typeof originalSubmitOrder === 'function') {
+          await originalSubmitOrder(e);
+        }
+        setTimeout(() => {
+          const resultCard = document.getElementById('result-card');
+          if (resultCard && !resultCard.classList.contains('hidden')) {
+            resultCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          }
+        }, 100);
+      };
+    });
+
+    // Handle modal close on outside click
+    document.addEventListener('click', (e) => {
+      if (e.target.classList.contains('modal')) {
+        e.target.classList.add('hidden');
+        e.target.setAttribute('hidden', '');
+      }
+    });
+
+    // Enhance table button styling
+    document.addEventListener('DOMContentLoaded', () => {
+      const style = document.createElement('style');
+      style.textContent = `
+        #sim-orders-tbody .btn {
+          padding: 8px 12px;
+          font-size: 12px;
+          margin: 2px;
+        }
+        #sim-orders-tbody .use-order {
+          background: var(--accent-gradient);
+          color: white;
+        }
+        #sim-orders-tbody .update-order {
+          background: var(--warning);
+          color: white;
+        }
+        #sim-orders-tbody .delete-order {
+          background: var(--error);
+          color: white;
+        }
+        #sim-orders-tbody .send-order {
+          background: var(--success);
+          color: white;
+        }
+      `;
+      document.head.appendChild(style);
+    });
+  </script>
+</body>
+
+</html>

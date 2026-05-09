@@ -1,0 +1,335 @@
+"""
+WADO Service V2
+Enhanced WADO-RS service with presigned URL support and multi-storage backend
+"""
+import logging
+import os
+import io
+from typing import Optional, List, Dict, Any, Union
+from sqlalchemy.orm import Session
+from sqlalchemy import and_
+import pydicom
+import numpy as np
+from PIL import Image
+
+from app.models.dicom_file import DicomFile
+from app.services.storage_adapter_manager import get_storage_adapter_manager
+from app.services.dicom_storage_service_v2 import DicomStorageServiceV2
+
+logger = logging.getLogger(__name__)
+
+
+class WadoServiceV2:
+    """
+    Enhanced WADO-RS service with multi-storage support
+
+    Features:
+    - Multi-storage retrieve support
+    - Presigned URL generation (for S3)
+    - Direct download bypass (CDN-friendly)
+    - Rendering support (DICOM to JPEG)
+    - Thumbnail generation
+    """
+
+    def __init__(self, db: Session):
+        """
+        Initialize WADO service V2
+
+        Args:
+            db: Database session
+        """
+        self.db = db
+        self.adapter_manager = get_storage_adapter_manager(db)
+        self.storage_service = DicomStorageServiceV2(db)
+        # Use a central cache directory for thumbnails
+        self.thumb_cache_dir = "/var/lib/pacs/storage/dicom/thumbnails"
+        if not os.path.exists(self.thumb_cache_dir):
+            try:
+                os.makedirs(self.thumb_cache_dir, exist_ok=True)
+            except Exception as e:
+                logger.warning(f"Could not create thumbnail cache dir: {e}")
+        
+        logger.info("WadoServiceV2 initialized")
+
+    async def get_instance(
+        self,
+        study_id: str,
+        series_id: str,
+        instance_id: str,
+        use_presigned_url: bool = False,
+        use_original: bool = False
+    ) -> Union[bytes, str, None]:
+        """Get DICOM instance by Study/Series/Instance UIDs"""
+        try:
+            dicom_file = self.db.query(DicomFile).filter(
+                and_(
+                    DicomFile.study_id == study_id,
+                    DicomFile.series_id == series_id,
+                    DicomFile.instance_id == instance_id,
+                    DicomFile.status.in_(['active', 'archived'])
+                )
+            ).first()
+
+            if not dicom_file:
+                return None
+
+            if use_presigned_url:
+                presigned_url = await self.get_instance_url(
+                    study_id, series_id, instance_id, use_original=use_original
+                )
+                if presigned_url:
+                    return presigned_url
+
+            storage_key = self._resolve_storage_key(dicom_file, use_original)
+            file_path = await self.storage_service.retrieve_dicom(
+                dicom_file,
+                storage_key_override=storage_key
+            )
+            if not file_path or not os.path.exists(file_path):
+                return None
+
+            with open(file_path, 'rb') as f:
+                data = f.read()
+
+            return data
+        except Exception as e:
+            logger.error(f"Error retrieving DICOM instance: {e}")
+            return None
+
+    async def get_rendered_image(
+        self,
+        study_id: str,
+        series_id: str,
+        instance_id: str,
+        window_center: Optional[int] = None,
+        window_width: Optional[int] = None,
+        quality: int = 90
+    ) -> Optional[bytes]:
+        """
+        Render DICOM instance to JPEG with windowing
+        """
+        try:
+            # 1. Get raw DICOM data
+            dicom_data = await self.get_instance(study_id, series_id, instance_id)
+            if not dicom_data:
+                return None
+
+            # 2. Parse DICOM
+            ds = pydicom.dcmread(io.BytesIO(dicom_data))
+            
+            if 'PixelData' not in ds:
+                logger.warning(f"Instance {instance_id} has no pixel data")
+                return None
+
+            # 3. Apply VOI LUT (Windowing)
+            pixel_array = ds.pixel_array
+
+            # Use provided windowing or fallback to DICOM tags
+            wc = window_center if window_center is not None else getattr(ds, 'WindowCenter', None)
+            ww = window_width if window_width is not None else getattr(ds, 'WindowWidth', None)
+
+            # Handle multiple values in tags
+            if isinstance(wc, pydicom.multival.MultiValue): wc = wc[0]
+            if isinstance(ww, pydicom.multival.MultiValue): ww = ww[0]
+
+            if wc is not None and ww is not None:
+                # Apply manual windowing
+                lower = wc - ww / 2
+                upper = wc + ww / 2
+                pixel_array = np.clip(pixel_array, lower, upper)
+                pixel_array = (pixel_array - lower) / ww * 255.0
+            else:
+                # Default scaling
+                pixel_array = ((pixel_array - pixel_array.min()) / (pixel_array.max() - pixel_array.min()) * 255.0)
+
+            # 4. Convert to 8-bit RGB
+            pixel_array = pixel_array.astype(np.uint8)
+            img = Image.fromarray(pixel_array)
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+
+            # 5. Save to JPEG
+            output = io.BytesIO()
+            img.save(output, format="JPEG", quality=quality)
+            return output.getvalue()
+
+        except Exception as e:
+            logger.error(f"Error rendering image V2: {e}", exc_info=True)
+            return None
+
+    async def get_thumbnail(
+        self,
+        study_id: str,
+        series_id: str,
+        instance_id: str,
+        size: int = 200
+    ) -> Optional[bytes]:
+        """
+        Get or generate thumbnail for DICOM instance
+        """
+        cache_path = os.path.join(self.thumb_cache_dir, f"{instance_id}_{size}.jpg")
+        
+        # 1. Check Cache
+        if os.path.exists(cache_path):
+            try:
+                with open(cache_path, 'rb') as f:
+                    return f.read()
+            except Exception as e:
+                logger.warning(f"Failed to read thumbnail cache: {e}")
+
+        # 2. Generate if not cached
+        try:
+            rendered = await self.get_rendered_image(study_id, series_id, instance_id, quality=75)
+            if not rendered:
+                return None
+
+            img = Image.open(io.BytesIO(rendered))
+            img.thumbnail((size, size))
+            
+            output = io.BytesIO()
+            img.save(output, format="JPEG", quality=85)
+            thumb_data = output.getvalue()
+
+            # Save to cache
+            try:
+                with open(cache_path, 'wb') as f:
+                    f.write(thumb_data)
+            except Exception as e:
+                logger.warning(f"Failed to write thumbnail cache: {e}")
+
+            return thumb_data
+
+        except Exception as e:
+            logger.error(f"Error generating thumbnail V2: {e}")
+            return None
+
+    async def get_instance_url(
+        self,
+        study_id: str,
+        series_id: str,
+        instance_id: str,
+        expiration: int = 3600,
+        use_original: bool = False
+    ) -> Optional[str]:
+        """Get presigned URL for DICOM instance"""
+        try:
+            dicom_file = self.db.query(DicomFile).filter(
+                and_(
+                    DicomFile.study_id == study_id,
+                    DicomFile.series_id == series_id,
+                    DicomFile.instance_id == instance_id,
+                    DicomFile.status.in_(['active', 'archived'])
+                )
+            ).first()
+
+            if not dicom_file or not dicom_file.storage_location_id:
+                return None
+
+            adapter = await self.adapter_manager.get_adapter(str(dicom_file.storage_location_id))
+            if not adapter or not hasattr(adapter, 'get_url'):
+                return None
+
+            storage_key = self._resolve_storage_key(dicom_file, use_original)
+            return await adapter.get_url(storage_key, expiration)
+        except Exception as e:
+            logger.error(f"Error generating presigned URL: {e}")
+            return None
+
+    async def get_instance_metadata(
+        self,
+        study_id: str,
+        series_id: str,
+        instance_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Get DICOM instance metadata"""
+        try:
+            dicom_file = self.db.query(DicomFile).filter(
+                and_(
+                    DicomFile.study_id == study_id,
+                    DicomFile.series_id == series_id,
+                    DicomFile.instance_id == instance_id,
+                    DicomFile.status.in_(['active', 'archived'])
+                )
+            ).first()
+
+            if not dicom_file:
+                return None
+
+            return {
+                'id': str(dicom_file.id),
+                'sop_instance_uid': dicom_file.sop_instance_uid,
+                'study_id': dicom_file.study_id,
+                'series_id': dicom_file.series_id,
+                'instance_id': dicom_file.instance_id,
+                'patient_id': dicom_file.patient_id,
+                'patient_name': dicom_file.patient_name,
+                'study_date': str(dicom_file.study_date) if dicom_file.study_date else None,
+                'modality': dicom_file.modality,
+                'file_size': dicom_file.file_size,
+                'storage_tier': dicom_file.storage_tier,
+                'created_at': dicom_file.created_at.isoformat() if dicom_file.created_at else None,
+                'dicom_metadata': dicom_file.dicom_metadata
+            }
+        except Exception as e:
+            logger.error(f"Error retrieving instance metadata: {e}")
+            return None
+
+    async def get_study_instances(self, study_id: str) -> List[Dict[str, Any]]:
+        """Get all instances for a study"""
+        try:
+            instances = self.db.query(DicomFile).filter(
+                and_(
+                    DicomFile.study_id == study_id,
+                    DicomFile.status.in_(['active', 'archived'])
+                )
+            ).all()
+
+            return [{
+                'id': str(i.id),
+                'sop_instance_uid': i.sop_instance_uid,
+                'study_id': i.study_id,
+                'series_id': i.series_id,
+                'instance_id': i.instance_id,
+                'modality': i.modality,
+                'file_size': i.file_size
+            } for i in instances]
+        except Exception as e:
+            logger.error(f"Error retrieving study instances: {e}")
+            return []
+
+    async def get_series_instances(self, study_id: str, series_id: str) -> List[Dict[str, Any]]:
+        """Get all instances for a series"""
+        try:
+            instances = self.db.query(DicomFile).filter(
+                and_(
+                    DicomFile.study_id == study_id,
+                    DicomFile.series_id == series_id,
+                    DicomFile.status.in_(['active', 'archived'])
+                )
+            ).all()
+
+            return [{
+                'id': str(i.id),
+                'sop_instance_uid': i.sop_instance_uid,
+                'study_id': i.study_id,
+                'series_id': i.series_id,
+                'instance_id': i.instance_id,
+                'modality': i.modality,
+                'file_size': i.file_size
+            } for i in instances]
+        except Exception as e:
+            logger.error(f"Error retrieving series instances: {e}")
+            return []
+
+    def _resolve_storage_key(self, dicom_file: DicomFile, use_original: bool) -> str:
+        """Determine storage key based on requested version"""
+        metadata = dicom_file.dicom_metadata or {}
+        if use_original:
+            original_key = metadata.get('original_storage_key')
+            if original_key:
+                return original_key
+        return metadata.get('synchronized_storage_key', dicom_file.file_path) or dicom_file.file_path
+
+
+def get_wado_service_v2(db: Session) -> WadoServiceV2:
+    return WadoServiceV2(db)

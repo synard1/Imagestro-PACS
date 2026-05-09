@@ -1,0 +1,18 @@
+#!/bin/bash
+set -e
+echo "PACS Service Starting..."
+mkdir -p /var/lib/pacs/storage/dicom/uploads
+mkdir -p /var/lib/pacs/storage/dicom/thumbnails
+mkdir -p /var/lib/pacs/storage/dicom/temp
+chmod 755 /var/lib/pacs/storage/dicom/uploads
+chmod 755 /var/lib/pacs/storage/dicom/thumbnails
+chmod 755 /var/lib/pacs/storage/dicom/temp
+mkdir -p /var/log/pacs
+chmod -R 755 /var/log/pacs
+
+if [ $# -eq 0 ]; then
+    echo "Starting with default uvicorn command..."
+    exec uvicorn app.main:app --host 0.0.0.0 --port 8003 --workers 4
+else
+    exec "$@"
+fi

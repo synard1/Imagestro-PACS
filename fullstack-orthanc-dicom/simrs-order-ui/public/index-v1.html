@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SIMRS Radiology Order Simulator</title>
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+
+<body>
+  <header class="app-header">
+    <div class="container">
+      <h1>SIMRS Radiology Order Simulator</h1>
+      <p class="subtitle">Form simulasi order radiologi hingga pengiriman ke DICOM Router SatuSehat</p>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <h2>Login Gateway (RBAC)</h2>
+      <div class="grid-2">
+        <label>Username<input id="username" type="text" placeholder="username" autocomplete="username" /></label>
+        <label>Password<input id="password" type="password" placeholder="password"
+            autocomplete="current-password" /></label>
+      </div>
+      <div class="actions">
+        <button id="btn-login" class="btn primary">Login</button>
+        <span id="login-status" class="status"></span>
+      </div>
+      <p class="helper">Token akan disimpan lokal dan digunakan untuk setiap request.</p>
+    </section>
+
+    <section class="card">
+      <h2>Buat Order Radiologi</h2>
+      <form id="order-form" autocomplete="on">
+        <input id="active_sim_order_id" type="hidden" />
+        <div class="card">
+          <h2>Data Pasien</h2>
+          <div class="grid-2">
+            <label>NIK Pasien<input id="patient_national_id" maxlength="16" /></label>
+            <label>SATUSEHAT Patient ID<input id="ihs_number" /></label>
+            <label>Nama Pasien<input id="patient_name" /></label>
+            <label>Jenis Kelamin<select id="sex">
+                <option value="male">male</option>
+                <option value="female">female</option>
+              </select></label>
+            <label>Tanggal Lahir<input id="birth_date" type="date" /></label>
+            <label>MRN<input id="mrn" list="mrnList" /></label>
+            <datalist id="mrnList"></datalist>
+            <!-- SATUSEHAT Patient ID: digabung ke field #ihs_number -->
+            <div><button type="button" id="btn-search-patient">Cari Patient</button></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Data Practitioner (Opsional)</h2>
+          <div class="grid-2">
+            <label>NIK Dokter<input id="practitioner_nik" /></label>
+            <label>Nama Dokter<input id="practitioner_name" /></label>
+            <label>Nomor IHS<input id="satusehat_practitioner_id" /></label>
+            <div><button type="button" id="btn-search-practitioner">Cari Practitioner</button></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Order Radiologi</h2>
+          <div class="grid-2">
+            <label>Modality<input id="modality" /></label>
+            <label>Kode LOINC<input id="procedure_code" list="loincList" /></label>
+            <datalist id="loincList"></datalist>
+            <label>Nama Pemeriksaan<input id="procedure_name" /></label>
+            <div><button type="button" id="btn-search-procedure">Pilih dari katalog</button></div>
+            <label>Tanggal Pendaftaran<input id="registration_date" type="date" /></label>
+            <label>Jadwal Pemeriksaan<input id="scheduled_at" type="datetime-local" /></label>
+            <label>Jenis Layanan<select id="service_type">
+                <option value="RJ">Rawat Jalan</option>
+                <option value="RI">Rawat Inap</option>
+                <option value="IGD">IGD</option>
+              </select></label>
+            <label>No. Registrasi<input id="registration_number" /></label>
+            <label>Catatan Klinis<textarea id="clinical_notes"></textarea></label>
+            <label>SATUSEHAT Location ID<input id="satusehat_location_id" /></label>
+            <!-- <label>SATUSEHAT Location<select id="satusehat_location_id"></select></label> -->
+            <label>SATUSEHAT Encounter ID<input id="satusehat_encounter_id" /></label>
+            <div class="actions">
+              <button type="button" id="btn-apply-dummy" class="btn">Gunakan Dummy</button>
+              <button type="button" id="btn-generate-enc" class="btn">GENERATE ENCOUNTER ID</button>
+              <button type="button" id="btn-search-enc" class="btn">CARI ENCOUNTER</button>
+              <button type="button" id="btn-save-order" class="btn">Simpan Order</button>
+              <button type="button" id="btn-preview" class="btn primary">Kirim Order</button>
+              <button type="button" id="btn-print" class="btn">Cetak Bukti</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <label class="checkbox"><input id="complete_flow" type="checkbox" />Jalankan complete-flow (kirim ke DICOM
+            Router)</label>
+          <label>Base URL Gateway<input id="gateway_base" type="text" value="http://103.42.117.19:8888"
+              placeholder="http://103.42.117.19:8888" /><small class="helper">Default:
+              103.42.117.19:8888</small></label>
+        </div>
+      </form>
+    </section>
+
+    <!-- <section class="card">
+      <h2>Registrasi Pasien Baru</h2>
+      <form id="patient-registration-form">
+        <div class="card">
+          <h2>Data Pasien Baru</h2>
+          <div class="grid-2">
+            <label>NIK Pasien<input id="patient-ihs-number" maxlength="16" /></label>
+            <label>ID Nasional<input id="patient-national-id" /></label>
+            <label>Nama Pasien<input id="patient-name" /></label>
+            <label>Jenis Kelamin<select id="patient-sex"><option value="male">male</option><option value="female">female</option></select></label>
+            <label>Tanggal Lahir<input id="patient-birth-date" type="date" /></label>
+          </div>
+          <div class="actions">
+            <button type="submit" class="btn primary">Daftar Pasien</button>
+          </div>
+        </div>
+      </form>
+    </section> -->
+
+    <section class="card">
+      <h2>Buat Service Request SatuSehat</h2>
+      <form id="service-request-form">
+        <div class="card">
+          <h2>Data Service Request</h2>
+          <div class="grid-2">
+            <label>Patient ID (SatuSehat)<input id="sr_patient_id" placeholder="Patient FHIR ID" required /></label>
+            <!-- <label>Patient Autocomplete<input id="patient_id" list="patient-list"
+                placeholder="Search patient..." /></label> -->
+            <label>Encounter ID (SatuSehat)<input id="sr_encounter_id" placeholder="Encounter FHIR ID"
+                required /></label>
+            <label>Practitioner ID (SatuSehat)<input id="sr_practitioner_id" placeholder="Practitioner FHIR ID"
+                required /></label>
+            <!-- <label>Practitioner Autocomplete<input id="practitioner_id" list="practitioner-list"
+                placeholder="Search practitioner..." /></label> -->
+            <label>Location ID (SatuSehat)<input id="sr_location_id" placeholder="Location FHIR ID" required /></label>
+            <!-- <label>Location ID (SatuSehat)<select id="sr_location_id" required></select></label> -->
+            <label>Procedure Code<input id="sr_code" placeholder="contoh: 24627-2" required /></label>
+            <label>Procedure Display<input id="sr_code_display" placeholder="contoh: Chest X-ray" required /></label>
+            <label>Category Code<input id="sr_category_code" value="394914008" /></label>
+            <label>Category Display<input id="sr_category_display" value="Radiology" /></label>
+            <label>Priority<select id="sr_priority">
+                <option value="routine">Routine</option>
+                <option value="urgent">Urgent</option>
+                <option value="asap">ASAP</option>
+                <option value="stat">STAT</option>
+              </select></label>
+            <label>Intent<select id="sr_intent">
+                <option value="order">Order</option>
+                <option value="plan">Plan</option>
+                <option value="proposal">Proposal</option>
+              </select></label>
+            <label>Status<select id="sr_status">
+                <option value="active">Active</option>
+                <option value="draft">Draft</option>
+                <option value="on-hold">On Hold</option>
+                <option value="revoked">Revoked</option>
+                <option value="completed">Completed</option>
+              </select></label>
+            <label>Authored On<input id="sr_authored_on" type="datetime-local" /></label>
+            <label>Reason Code<input id="sr_reason_code" placeholder="Optional reason code" /></label>
+            <label>Reason Display<input id="sr_reason_display" placeholder="Optional reason display" /></label>
+            <label>Notes<textarea id="sr_note" placeholder="Additional notes"></textarea></label>
+          </div>
+          <div class="actions">
+            <button type="button" id="btn-copy-from-order" class="btn">Copy dari Order</button>
+            <button type="button" id="btn-create-service-request" class="btn primary">Buat Service Request</button>
+          </div>
+        </div>
+      </form>
+    </section>
+
+    <section class="card" id="result-card" hidden>
+      <h2>Hasil Order</h2>
+      <pre id="result-json" class="code"></pre>
+      <div class="actions"><button id="btn-print" class="btn">Cetak/Simpan Bukti Order</button></div>
+    </section>
+    <section class="card" id="sim-orders-section">
+      <h2>Daftar Order Simulasi</h2>
+      <div class="actions">
+        <button id="btn-load-orders" class="btn">Muat Daftar Order</button>
+      </div>
+      <div class="table-responsive">
+        <table id="sim-orders-table" class="table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Dibuat</th>
+              <th>Nama</th>
+              <th>MRN</th>
+              <th>Dokter</th>
+              <th>IHS Dokter</th>
+              <th>Lokasi ID</th>
+              <th>Modality</th>
+              <th>LOINC</th>
+              <th>Jadwal</th>
+              <th>Reg No</th>
+              <th>Layanan</th>
+              <th>Dilayani</th>
+              <th>Encounter</th>
+              <th>Service Request</th>
+              <th>DICOM</th>
+              <th>SatuSehat</th>
+              <th>ImagingStudy ID</th>
+              <th>Aksi</th>
+            </tr>
+          </thead>
+          <tbody id="sim-orders-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- Modal Preview -->
+  <div id="order-preview-modal" class="modal" hidden>
+    <div class="modal-content">
+      <h3>Preview Data Order</h3>
+      <pre id="preview-json" class="code"></pre>
+      <div class="actions">
+        <button id="btn-confirm" class="btn primary">Konfirmasi & Kirim</button>
+        <button id="btn-cancel" class="btn">Batal</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Patient Search Modal -->
+  <div id="patient-search-modal" class="modal" hidden>
+    <div class="modal-content wide">
+      <h3>Cari Patient</h3>
+      <div class="grid-3">
+        <label>NIK<input id="patient_search_nik" placeholder="contoh: 9270060312000001" /></label>
+        <label>SATUSEHAT Patient ID<input id="patient_search_ihs" placeholder="contoh: Patient FHIR ID" /></label>
+        <label>Nama<input id="patient_search_name" placeholder="contoh: Ardanto" /></label>
+      </div>
+      <div class="actions">
+        <button id="btn-patient-search-run">Cari</button>
+        <button onclick="document.querySelector('#patient-modal').hidden=true">Tutup</button>
+      </div>
+      <div class="table-responsive">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>NIK</th>
+              <th>Nama</th>
+              <th>Gender</th>
+              <th>birthDate</th>
+              <th>Patient ID</th>
+              <th>Satusehat ID</th>
+            </tr>
+          </thead>
+          <tbody id="patient-results"></tbody>
+        </table>
+      </div>
+      <p class="hint">Double click baris untuk memilih.</p>
+    </div>
+  </div>
+
+  <!-- Practitioner Search Modal -->
+  <div id="practitioner-search-modal" class="modal" hidden>
+    <div class="modal-content wide">
+      <h3>Cari Practitioner</h3>
+      <div class="grid-3">
+        <label>NIK<input id="prac_search_nik" placeholder="contoh: 7209061219000001" /></label>
+        <label>Nama<input id="prac_search_name" placeholder="contoh: dr. Alexander" /></label>
+      </div>
+      <div class="actions">
+        <button id="btn-prac-search-run">Cari</button>
+        <button onclick="document.querySelector('#practitioner-modal').hidden=true">Tutup</button>
+      </div>
+      <div class="table-responsive">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>NIK</th>
+              <th>Nama</th>
+              <th>Gender</th>
+              <th>birthDate</th>
+              <th>Practitioner ID</th>
+              <th>Satusehat ID</th>
+            </tr>
+          </thead>
+          <tbody id="practitioner-results"></tbody>
+        </table>
+      </div>
+      <p class="hint">Double click baris untuk memilih.</p>
+    </div>
+  </div>
+
+  <!-- Procedure Search Modal -->
+  <div id="procedure-modal" class="modal" hidden>
+    <div class="modal-content wide">
+      <h3>Katalog Tindakan</h3>
+      <div class="actions">
+        <button onclick="document.querySelector('#procedure-modal').hidden=true">Tutup</button>
+      </div>
+      <div class="table-responsive">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>No</th>
+              <th>Nama</th>
+              <th>Tipe</th>
+              <th>Kode</th>
+              <th>Display</th>
+            </tr>
+          </thead>
+          <tbody id="procedure-results"></tbody>
+        </table>
+      </div>
+      <p class="hint">Double click baris untuk memilih.</p>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="toast" hidden>
+    <span id="toast-message"></span>
+  </div>
+
+  <!-- Datalists for autocomplete -->
+  <datalist id="patient-list"></datalist>
+  <datalist id="practitioner-list"></datalist>
+
+  <script type="module" src="/static/app.js"></script>
+</body>
+
+</html>

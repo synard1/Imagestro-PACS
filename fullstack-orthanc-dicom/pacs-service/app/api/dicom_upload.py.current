@@ -1,0 +1,445 @@
+"""
+DICOM Upload API
+Handles DICOM file uploads with automatic tag extraction and updates
+"""
+
+import logging
+import os
+import hashlib
+from typing import Optional
+from pathlib import Path
+from datetime import datetime
+
+from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, status
+from fastapi.responses import JSONResponse
+from sqlalchemy.orm import Session
+
+from app.database import get_db
+from app.models.dicom_file import DicomFile
+from app.services.dicom_parser import get_dicom_parser
+from app.services.dicom_tag_updater import get_dicom_tag_updater
+from app.services.dicom_hierarchy import store_dicom_hierarchy
+from app.utils.logger import get_logger
+import pydicom
+
+logger = get_logger(__name__)
+router = APIRouter(prefix="/api/dicom", tags=["dicom-upload"])
+
+
+# Configuration
+# Use STORAGE_PATH from environment (matches Docker volume mount)
+STORAGE_PATH = os.getenv("STORAGE_PATH", "/var/lib/pacs/storage")
+DEFAULT_UPLOAD_DIR = os.path.join(STORAGE_PATH, "dicom", "uploads")
+UPLOAD_DIR = os.getenv("DICOM_UPLOAD_DIR", DEFAULT_UPLOAD_DIR)
+MAX_FILE_SIZE = int(os.getenv("MAX_DICOM_SIZE", 100 * 1024 * 1024))  # 100MB default
+
+logger.info(f"DICOM upload directory: {UPLOAD_DIR} (STORAGE_PATH: {STORAGE_PATH})")
+
+
+@router.post("/upload")
+async def upload_dicom_file(
+    file: UploadFile = File(..., description="DICOM file to upload (.dcm or .dicom)"),
+    category: Optional[str] = Form("dicom", description="File category"),
+    description: Optional[str] = Form(None, description="Optional description"),
+    order_id: Optional[str] = Form(None, description="Optional order ID"),
+    db: Session = Depends(get_db)
+):
+    """
+    Upload DICOM file with automatic tag extraction
+    
+    - **file**: DICOM file (.dcm or .dicom) - REQUIRED
+    - **category**: File category (default: "dicom")
+    - **description**: Optional description
+    - **order_id**: Optional order ID
+    
+    - Validates DICOM file
+    - Stores file securely
+    - Extracts and updates DICOM tags automatically
+    - Returns file metadata with extracted tags
+    """
+    try:
+        logger.info(f"Receiving DICOM upload: {file.filename} (size: {file.size} bytes)")
+        
+        # Validate file presence and basic info
+        if not file:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="No file provided. Use 'file' as the form field name."
+            )
+        
+        if not file.filename:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="File has no filename"
+            )
+        
+        logger.info(f"Receiving DICOM upload: {file.filename} (size: {file.size} bytes)")
+        
+        # Validate file type
+        if not file.filename.lower().endswith(('.dcm', '.dicom')):
+            # Check content type as fallback
+            if file.content_type not in ['application/dicom', 'application/octet-stream']:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"File '{file.filename}' must be a DICOM file (.dcm or .dicom). Current content-type: {file.content_type}"
+                )
+        
+        # Generate unique file ID
+        file_id = f"{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{os.urandom(8).hex()}"
+        
+        # Ensure filename has .dcm extension
+        filename = file.filename
+        if not filename.lower().endswith('.dcm'):
+            filename = f"{filename}.dcm"
+        
+        # Create file path
+        file_path = os.path.join(UPLOAD_DIR, f"{file_id}.dcm")
+        
+        # Ensure upload directory exists right before writing
+        upload_dir = os.path.dirname(file_path)
+        os.makedirs(upload_dir, exist_ok=True)
+        logger.info(f"Ensured upload directory exists: {upload_dir}")
+        
+        # Read and save file
+        content = await file.read()
+        
+        # Check file size
+        if len(content) > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"File size exceeds maximum allowed size of {MAX_FILE_SIZE / (1024*1024)}MB"
+            )
+        
+        # Calculate checksum
+        file_hash = hashlib.sha256(content).hexdigest()
+        
+        # Save file with full error checking
+        logger.info(f"About to save {len(content)} bytes to: {file_path}")
+        
+        try:
+            with open(file_path, 'wb') as f:
+                f.write(content)
+            if os.path.exists(file_path) and os.path.getsize(file_path) == len(content):
+                logger.info(f"✅ File saved successfully: {file_path} ({len(content)} bytes)")
+            else:
+                raise Exception(f"File save verification failed: {file_path}")
+        except Exception as save_error:
+            logger.error(f"❌ File save failed: {save_error}")
+            raise
+        
+        # Validate DICOM file with full path verification
+        if not os.path.exists(file_path):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"DICOM file missing after save: {file_path}"
+            )
+        
+        parser = get_dicom_parser()
+        logger.info(f"Validating DICOM file: {file_path}")
+        if not parser.validate_dicom(file_path):
+            # Clean up invalid file
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid DICOM file"
+            )
+        
+        # Parse DICOM metadata
+        metadata = parser.parse_file(file_path)
+        logger.info(f"Parsed DICOM metadata: {metadata.get('patient_id')}, {metadata.get('study_id')}")
+        
+        # Store in hierarchy (Study → Series → Instance) - CRITICAL for /api/studies
+        logger.info(f"Creating DICOM hierarchy for Study: {metadata.get('study_id')}")
+        try:
+            ds = pydicom.dcmread(file_path)
+            hierarchy_result = store_dicom_hierarchy(db, ds)
+            db.commit()  # Force commit hierarchy
+            if hierarchy_result.get('success'):
+                logger.info(f"✅ Hierarchy created: Study {hierarchy_result.get('study_uid')}")
+            else:
+                logger.error(f"❌ Hierarchy failed: {hierarchy_result.get('error')}")
+                raise Exception(hierarchy_result.get('error', 'Unknown hierarchy error'))
+        except Exception as hierarchy_error:
+            logger.error(f"❌ Hierarchy creation FAILED: {hierarchy_error}")
+            db.rollback()
+            
+            # FALLBACK: Create minimal Study record for /api/studies
+            try:
+                from app.models.study import Study
+                study_uid = metadata.get('study_id', '')
+                if study_uid:
+                    existing = db.query(Study).filter(Study.study_instance_uid == study_uid).first()
+                    if not existing:
+                        study = Study(
+                            study_instance_uid=study_uid,
+                            patient_name=metadata.get('patient_name', ''),
+                            patient_id=metadata.get('patient_id'),
+                            study_date=metadata.get('study_date'),
+                            study_time=metadata.get('study_time'),
+                            modality=metadata.get('modality', ''),
+                            study_description=metadata.get('study_description', ''),
+                            patient_sex=metadata.get('patient_sex'),
+                            patient_birth_date=metadata.get('patient_birth_date')
+                        )
+                        db.add(study)
+                        db.commit()
+                        logger.info(f"✅ FALLBACK Study created: {study_uid}")
+            except Exception as fallback_error:
+                logger.error(f"Fallback Study creation failed: {fallback_error}")
+        
+        # Check if DICOM file already exists (by SOP Instance UID)
+        sop_instance_uid = metadata.get('sop_instance_uid', '')
+        existing_file = db.query(DicomFile).filter(
+            DicomFile.sop_instance_uid == sop_instance_uid
+        ).first()
+        
+        if existing_file:
+            # File already exists - update it instead of creating new
+            logger.info(f"DICOM file already exists (SOP Instance UID: {sop_instance_uid}), updating...")
+            
+            # Remove the newly uploaded file since we'll use the existing one
+            existing_file_path = file_path  # Save original path for tag updater
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                logger.info(f"Removed duplicate file: {file_path}")
+            
+            # Update existing record with new metadata
+            existing_file.file_size = len(content)
+            existing_file.file_hash = file_hash
+            existing_file.patient_id = metadata.get('patient_id')
+            existing_file.patient_name = metadata.get('patient_name')
+            existing_file.patient_birth_date = metadata.get('patient_birth_date')
+            existing_file.patient_sex = metadata.get('patient_sex')
+            existing_file.study_date = metadata.get('study_date')
+            existing_file.study_time = metadata.get('study_time')
+            existing_file.study_description = metadata.get('study_description')
+            existing_file.modality = metadata.get('modality')
+            existing_file.body_part = metadata.get('body_part')
+            existing_file.series_number = metadata.get('series_number')
+            existing_file.instance_number = metadata.get('instance_number')
+            existing_file.updated_at = datetime.utcnow()
+            
+            # Update metadata
+            if not existing_file.dicom_metadata:
+                existing_file.dicom_metadata = {}
+            existing_file.dicom_metadata.update({
+                'filename': filename,
+                'category': category,
+                'description': description,
+                'order_id': order_id,
+                'last_uploaded_at': datetime.utcnow().isoformat()
+            })
+            
+            db.commit()
+            db.refresh(existing_file)
+            dicom_file = existing_file
+            
+            logger.info(f"Updated existing DicomFile record: {dicom_file.id}")
+            
+            # Use existing file path for tag updates (don't try to read deleted temp file)
+            tag_update_file_path = existing_file.file_path
+        else:
+            # Create new database record
+            dicom_file = DicomFile(
+                study_id=metadata.get('study_id', ''),
+                series_id=metadata.get('series_id', ''),
+                instance_id=metadata.get('instance_id', ''),
+                sop_class_uid=metadata.get('sop_class_uid', ''),
+                sop_instance_uid=sop_instance_uid,
+                file_path=file_path,
+                file_size=len(content),
+                file_hash=file_hash,
+                patient_id=metadata.get('patient_id'),
+                patient_name=metadata.get('patient_name'),
+                patient_birth_date=metadata.get('patient_birth_date'),
+                patient_sex=metadata.get('patient_sex'),
+                study_date=metadata.get('study_date'),
+                study_time=metadata.get('study_time'),
+                study_description=metadata.get('study_description'),
+                modality=metadata.get('modality'),
+                body_part=metadata.get('body_part'),
+                series_number=metadata.get('series_number'),
+                instance_number=metadata.get('instance_number'),
+                rows=metadata.get('rows'),
+                columns=metadata.get('columns'),
+                bits_allocated=metadata.get('bits_allocated'),
+                bits_stored=metadata.get('bits_stored'),
+                number_of_frames=metadata.get('number_of_frames', 1),
+                pixel_spacing=metadata.get('pixel_spacing'),
+                slice_thickness=metadata.get('slice_thickness'),
+                transfer_syntax_uid=metadata.get('transfer_syntax_uid'),
+                is_compressed=parser.is_compressed(file_path),
+                status='active',
+                dicom_metadata={
+                    'filename': filename,
+                    'category': category,
+                    'description': description,
+                    'order_id': order_id,
+                    'uploaded_at': datetime.utcnow().isoformat()
+                }
+            )
+            
+            db.add(dicom_file)
+            db.commit()
+            db.refresh(dicom_file)
+            
+            logger.info(f"Created new DicomFile record: {dicom_file.id}")
+        
+        logger.info(f"Created DicomFile record: {dicom_file.id}")
+        
+        # Update DICOM tags (OPTIONAL - don't fail upload if tag update fails)
+        dicom_tags = {}
+        try:
+            tag_updater = get_dicom_tag_updater()
+            tag_file_path = tag_update_file_path if 'tag_update_file_path' in locals() else file_path
+            dicom_tags = await tag_updater.update_tags_on_upload(
+                db=db,
+                file_path=tag_file_path,
+                dicom_file_id=str(dicom_file.id)
+            )
+            logger.info(f"✅ Updated DICOM tags for file: {dicom_file.id}")
+        except Exception as tag_error:
+            logger.warning(f"⚠️ Tag update failed (upload still successful): {tag_error}")
+            dicom_tags = {}
+        
+        # Return response
+        is_update = existing_file is not None
+        return JSONResponse(
+            status_code=status.HTTP_200_OK if is_update else status.HTTP_201_CREATED,
+            content={
+                "success": True,
+                "message": "DICOM file updated successfully" if is_update else "DICOM file uploaded successfully",
+                "is_update": is_update,
+                "file": {
+                    "id": str(dicom_file.id),
+                    "filename": filename,
+                    "file_size": len(content),
+                    "file_hash": file_hash,
+                    "category": category,
+                    "uploaded_at": dicom_file.created_at.isoformat()
+                },
+                "dicom_metadata": {
+                    "patient_id": metadata.get('patient_id'),
+                    "patient_name": metadata.get('patient_name'),
+                    "study_id": metadata.get('study_id'),
+                    "series_id": metadata.get('series_id'),
+                    "modality": metadata.get('modality'),
+                    "study_date": metadata.get('study_date').isoformat() if metadata.get('study_date') else None,
+                    "study_description": metadata.get('study_description')
+                },
+                "dicom_tags": dicom_tags
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to upload DICOM file: {str(e)}", exc_info=True)
+        
+        # Clean up file if it was created
+        if 'file_path' in locals() and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception as cleanup_error:
+                logger.warning(f"Failed to cleanup file {file_path}: {cleanup_error}")
+        
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload DICOM file: {str(e)}"
+        )
+
+
+@router.get("/files/{file_id}/tags")
+async def get_dicom_tags(
+    file_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get DICOM tags for a specific file
+    """
+    try:
+        dicom_file = db.query(DicomFile).filter(DicomFile.id == file_id).first()
+        
+        if not dicom_file:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="DICOM file not found"
+            )
+        
+        # Extract AWS compatible tags from metadata
+        aws_tags = dicom_file.dicom_metadata.get('aws_dicom_tags', {}) if dicom_file.dicom_metadata else {}
+        
+        return {
+            "file_id": str(dicom_file.id),
+            "filename": dicom_file.dicom_metadata.get('filename') if dicom_file.dicom_metadata else None,
+            "dicom_tags": aws_tags,
+            "metadata": {
+                "patient_id": dicom_file.patient_id,
+                "patient_name": dicom_file.patient_name,
+                "patient_sex": dicom_file.patient_sex,
+                "study_id": dicom_file.study_id,
+                "series_id": dicom_file.series_id,
+                "modality": dicom_file.modality,
+                "study_date": dicom_file.study_date.isoformat() if dicom_file.study_date else None,
+                "study_description": dicom_file.study_description
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get DICOM tags: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get DICOM tags: {str(e)}"
+        )
+
+
+@router.post("/files/{file_id}/refresh-tags")
+async def refresh_dicom_tags(
+    file_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Refresh DICOM tags for a specific file
+    Re-parses the DICOM file and updates tags
+    """
+    try:
+        dicom_file = db.query(DicomFile).filter(DicomFile.id == file_id).first()
+        
+        if not dicom_file:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="DICOM file not found"
+            )
+        
+        if not os.path.exists(dicom_file.file_path):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="DICOM file not found on disk"
+            )
+        
+        # Update tags
+        tag_updater = get_dicom_tag_updater()
+        dicom_tags = await tag_updater.update_tags_on_upload(
+            db=db,
+            file_path=dicom_file.file_path,
+            dicom_file_id=file_id
+        )
+        
+        return {
+            "success": True,
+            "message": "DICOM tags refreshed successfully",
+            "file_id": file_id,
+            "dicom_tags": dicom_tags
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to refresh DICOM tags: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to refresh DICOM tags: {str(e)}"
+        )

@@ -1,0 +1,62 @@
+{
+  "name": "unified-order-processing",
+  "version": "1.0.0",
+  "description": "Unified Order Processing Service - Combines accession-api and order-management functionality",
+  "main": "src/unified-server.ts",
+  "type": "module",
+  "scripts": {
+    "start": "node dist/unified-server.js",
+    "dev": "nodemon --loader ts-node/esm src/unified-server.ts",
+    "build": "tsc",
+    "test": "jest",
+    "lint": "eslint src/**/*.ts",
+    "format": "prettier --write src/**/*.ts"
+  },
+  "keywords": [
+    "dicom",
+    "orthanc",
+    "accession",
+    "order-management",
+    "healthcare",
+    "unified-api"
+  ],
+  "author": "Healthcare IT Team",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "pg": "^8.11.3",
+    "uuid": "^9.0.1",
+    "dotenv": "^16.3.1",
+    "joi": "^17.11.0",
+    "moment": "^2.29.4"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/cors": "^2.8.17",
+    "@types/pg": "^8.10.7",
+    "@types/uuid": "^9.0.7",
+    "@types/node": "^20.8.10",
+    "typescript": "^5.2.2",
+    "ts-node": "^10.9.1",
+    "nodemon": "^3.0.1",
+    "jest": "^29.7.0",
+    "@types/jest": "^29.5.8",
+    "eslint": "^8.53.0",
+    "@typescript-eslint/eslint-plugin": "^6.10.0",
+    "@typescript-eslint/parser": "^6.10.0",
+    "prettier": "^3.0.3"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/your-org/unified-order-processing.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-org/unified-order-processing/issues"
+  },
+  "homepage": "https://github.com/your-org/unified-order-processing#readme"
+}

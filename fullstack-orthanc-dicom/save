@@ -1,0 +1,226 @@
+/home/apps/fullstack-orthanc-dicom/order-management/docs/schema-orders.md
+# Schema Orders (Unified)
+
+Dokumen ini merangkum struktur logis tabel `orders` yang digunakan oleh
+Order Management Service, termasuk peran tiap kolom dalam alur:
+
+- Pembuatan order (Create)
+- Integrasi SATUSEHAT
+- Pembuatan DICOM Modality Worklist (MWL)
+- Audit & housekeeping
+
+Catatan:
+- Implementasi aktual dibuat defensif: beberapa kolom ditambahkan dengan
+  `ADD COLUMN IF NOT EXISTS` dan rename dari skema lama.
+- Tidak semua kolom wajib diisi pada setiap alur.
+- Tabel ini adalah view konseptual dari implementasi saat ini
+  (lihat juga `init_database()` di `order_management_service.py`).
+
+## Identitas & Organisasi
+
+- id (UUID)
+  - Primary key.
+  - Dibuat oleh service.
+
+- org_id (UUID / VARCHAR)
+  - Organisasi/fasilitas pemilik order.
+  - Diisi otomatis via `resolve_default_org_uuid()` dari tabel `satusehat_orgs`.
+  - Input langsung dari klien tidak disarankan.
+
+- patient_id (UUID)
+  - Relasi ke tabel `patients` (Master Data) jika tersedia.
+  - Diisi otomatis oleh `ensure_patient_record()`.
+  - Read-only untuk klien.
+
+## Order & Accession
+
+- order_number (VARCHAR)
+  - Unik.
+  - Digenerate oleh service (`ORDER_NUMBER_PREFIX` + tanggal + counter).
+  - Wajib secara logis; tidak boleh diubah melalui API.
+
+- accession_number (VARCHAR)
+  - Unik.
+  - Diutamakan:
+    - Menggunakan nilai yang dikirim klien, jika ada.
+    - Jika tidak ada, digenerate melalui `accession-api`.
+  - Tidak boleh diubah via update endpoint.
+
+- modality (VARCHAR)
+  - Jenis modality, misal: CT, MR, CR, US.
+  - Wajib di create.
+
+- procedure_code (VARCHAR)
+  - Kode prosedur, bisa juga LOINC.
+  - Dipakai pada:
+    - Konteks klinis,
+    - Sync ke SATUSEHAT (ServiceRequest).
+
+- procedure_name (VARCHAR)
+  - Nama/label prosedur.
+  - Digunakan untuk tampilan dan fallback `procedure_description`.
+
+- procedure_description (TEXT)
+  - Deskripsi lebih lengkap prosedur (opsional).
+  - Untuk MWL:
+    - `procedure_description` → jika null, fallback ke `procedure_name`.
+
+## Dokter, Perawat, dan Stasiun
+
+- referring_doctor (VARCHAR)
+  - Dokter pengirim/pengaju.
+  - Pada create:
+    - Bisa dikirim sebagai `referring_doctor` atau `referring_physician`.
+
+- attending_nurse (VARCHAR)
+  - Perawat yang menangani (opsional).
+  - Disimpan di order dan dapat diupdate.
+  - Tidak otomatis dikirim ke MWL/SATUSEHAT (bisa ditambah jika diperlukan).
+
+- ordering_physician_name (VARCHAR)
+  - Nama dokter pemesan.
+  - Digunakan di MWL sebagai `physician_name` (jika diisi).
+
+- performing_physician_name (VARCHAR)
+  - Nama dokter pelaksana (opsional).
+
+- ordering_station_aet (VARCHAR)
+  - AE Title pemesan (opsional).
+  - Ada alias lama `station_ae_title` yang dinormalisasi.
+
+## Jadwal & Registrasi
+
+- scheduled_at (TIMESTAMPTZ)
+  - Jadwal pemeriksaan.
+  - Untuk MWL:
+    - Dipecah menjadi `scheduled_date` dan `scheduled_time`.
+
+- registration_number (VARCHAR)
+  - Nomor registrasi.
+  - Dipakai dalam logika anti-duplicate.
+
+## Identitas Pasien
+
+- patient_national_id (VARCHAR)
+  - NIK (jika ada).
+  - Salah satu dari NIK atau MRN wajib saat create.
+
+- medical_record_number (VARCHAR)
+  - MRN dari SIMRS.
+  - Bisa digunakan sebagai fallback jika NIK tidak ada.
+
+- patient_name (VARCHAR)
+  - Nama pasien.
+  - Wajib saat create.
+
+- gender (VARCHAR)
+  - "male" / "female".
+  - Wajib saat create.
+
+- birth_date (DATE)
+  - Tanggal lahir.
+  - Wajib saat create.
+
+- patient_phone (VARCHAR), patient_address (TEXT), patient_email (VARCHAR)
+  - Opsional.
+  - Dipakai untuk pengayaan data pasien (jika tersedia).
+
+## SATUSEHAT / FHIR
+
+- satusehat_ihs_number (VARCHAR)
+  - ID pasien di SATUSEHAT (IHS/Patient.id).
+  - Bisa dikirim saat create atau diisi saat sync.
+
+- satusehat_encounter_id (VARCHAR)
+  - Encounter.id di SATUSEHAT.
+  - Dipakai saat sync `ServiceRequest`.
+
+- satusehat_service_request_id (VARCHAR)
+  - ServiceRequest.id di SATUSEHAT.
+  - Diisi setelah sync berhasil.
+
+- satusehat_synced (BOOLEAN)
+  - True jika sync ke SATUSEHAT berhasil.
+
+- satusehat_sync_date (TIMESTAMPTZ)
+  - Timestamp terakhir sync berhasil.
+
+## Status & Lifecycle
+
+- status (VARCHAR)
+  - Status dasar order.
+  - Default: `CREATED`.
+  - Dipakai juga untuk soft delete (`DELETED`).
+
+- order_status (VARCHAR)
+  - Status bisnis order yang lebih kaya.
+  - Contoh nilai:
+    - `CREATED` (setelah create),
+    - `SYNCED` (setelah sync SATUSEHAT),
+    - `SCHEDULED` (setelah worklist dibuat).
+  - Selaras namun lebih spesifik daripada `status`.
+
+- worklist_status (VARCHAR)
+  - Status MWL:
+    - `CREATED` saat worklist berhasil dibuat.
+
+- imaging_status (VARCHAR)
+  - Disiapkan untuk status proses pencitraan
+    (misalnya `IN_PROGRESS`, `COMPLETED`), implementasi lanjutan.
+
+## Audit & Metadata
+
+- details (JSONB)
+  - Struktur audit standar:
+
+    ```json
+    {
+      "created": { "by": "...", "at": "..." },
+      "updated": { "by": "...", "at": "..." } | null,
+      "deleted": { "by": "...", "at": "..." } | null
+    }
+    ```
+
+  - Diisi otomatis:
+    - created: saat order dibuat (menggunakan JWT/headers jika ada).
+    - updated: oleh operasi update/sync/worklist.
+    - deleted: oleh soft delete.
+  - Digunakan untuk audit dan pelacakan perubahan.
+
+- created_at (TIMESTAMPTZ)
+  - Timestamp pembuatan row.
+
+- updated_at (TIMESTAMPTZ)
+  - Timestamp update terakhir.
+
+## Ringkasan Peran Kolom
+
+- Kolom input utama klien (create):
+  - modality, patient_name, gender, birth_date,
+  - patient_national_id / medical_record_number,
+  - procedure_code, procedure_name,
+  - referring_doctor,
+  - attending_nurse (opsional),
+  - registration_number, scheduled_at,
+  - satusehat_ihs_number / satusehat_encounter_id (opsional),
+  - accession_number (opsional, jika tidak disediakan akan digenerate).
+
+- Kolom hasil generate/internal:
+  - id, order_number, accession_number,
+  - patient_id, org_id,
+  - status, order_status, worklist_status, imaging_status,
+  - satusehat_service_request_id, satusehat_synced, satusehat_sync_date,
+  - details, created_at, updated_at.
+
+- Kolom yang digunakan khusus integrasi:
+  - SATUSEHAT:
+    - satusehat_ihs_number, satusehat_encounter_id,
+      satusehat_service_request_id, satusehat_synced, satusehat_sync_date.
+  - MWL:
+    - modality, procedure_description/procedure_name,
+      accession_number, patient_* fields, ordering_physician_name,
+      scheduled_at, ordering_station_aet (via MWL_STATION_AET env).
+
+Untuk referensi teknis lengkap:
+- Lihat `init_database()` dan endpoint terkait di:
+  - `/home/apps/fullstack-orthanc-dicom/order-management/order_management_service.py`

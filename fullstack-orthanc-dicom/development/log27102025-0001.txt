@@ -1,0 +1,167 @@
+python comprehensive_db_analysis.py
+
+============================================================
+ COMPREHENSIVE DATABASE ANALYSIS
+============================================================
+Timestamp: 2025-10-27T14:45:52.232326
+
+============================================================
+ CONNECTION TESTS
+============================================================
+
+----------------------------------------
+ Testing simrs-order-ui (localhost:5532) Connection
+----------------------------------------
+Host: localhost:5532
+Database: worklist_db
+User: dicom
+✅ Connection successful!
+PostgreSQL Version: PostgreSQL 17.6 on x86_64-pc-linux-musl, compiled by gcc (Alpine 14.2.0) 14.2.0, 64-bit
+
+✅ Using simrs-order-ui (localhost:5532) for detailed analysis
+
+============================================================
+ SCHEMA ANALYSIS
+============================================================
+
+----------------------------------------
+ Analyzing Schema via simrs-order-ui (localhost:5532)
+----------------------------------------
+✅ Table 'sim_orders' exists
+✅ Column 'satusehat_service_request_id' exists
+   Data Type: character varying
+   Max Length: 100
+   Nullable: YES
+
+📊 Sample data:
+   ID: 3efb2fae-54cb-46e0-bf8c-a30ce03a48b1
+   Service Request ID: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+   Length: 100
+
+
+📋 All columns in sim_orders table:
+   id: uuid
+   created_at: timestamp with time zone
+   patient_national_id: character varying(16)
+   ihs_number: character varying(64)
+   mrn: character varying(50)
+   patient_name: character varying(200)
+   sex: character varying(10)
+   birth_date: date
+   modality: character varying(10)
+   procedure_code: character varying(50)
+   procedure_name: character varying(200)
+   scheduled_at: timestamp with time zone
+   registration_number: character varying(50)
+   clinical_notes: text
+   service_type: character varying(20)
+   served_status: character varying(20)
+   dicom_status: character varying(20)
+   satusehat_status: character varying(20)
+   satusehat_imaging_study_id: character varying(100)
+   encounter_status: character varying(20)
+   service_request_status: character varying(20)
+   satusehat_encounter_id: character varying(100)
+   satusehat_service_request_id: character varying(100)
+   practitioner_nik: character varying(16)
+   practitioner_name: character varying(200)
+   satusehat_practitioner_id: character varying(100)
+   satusehat_location_id: character varying(100)
+
+============================================================
+ SCHEMA FIX ATTEMPT
+============================================================
+
+----------------------------------------
+ Attempting Schema Fix via simrs-order-ui (localhost:5532)
+----------------------------------------
+🔧 Attempting to alter satusehat_service_request_id to VARCHAR(100)...
+✅ Schema alteration successful!
+✅ Verified: New max length is 100
+
+============================================================
+ POST-FIX SCHEMA VERIFICATION
+============================================================
+
+----------------------------------------
+ Analyzing Schema via simrs-order-ui (localhost:5532)
+----------------------------------------
+✅ Table 'sim_orders' exists
+✅ Column 'satusehat_service_request_id' exists
+   Data Type: character varying
+   Max Length: 100
+   Nullable: YES
+
+📊 Sample data:
+   ID: 3efb2fae-54cb-46e0-bf8c-a30ce03a48b1
+   Service Request ID: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+   Length: 100
+
+
+📋 All columns in sim_orders table:
+   id: uuid
+   created_at: timestamp with time zone
+   patient_national_id: character varying(16)
+   ihs_number: character varying(64)
+   mrn: character varying(50)
+   patient_name: character varying(200)
+   sex: character varying(10)
+   birth_date: date
+   modality: character varying(10)
+   procedure_code: character varying(50)
+   procedure_name: character varying(200)
+   scheduled_at: timestamp with time zone
+   registration_number: character varying(50)
+   clinical_notes: text
+   service_type: character varying(20)
+   served_status: character varying(20)
+   dicom_status: character varying(20)
+   satusehat_status: character varying(20)
+   satusehat_imaging_study_id: character varying(100)
+   encounter_status: character varying(20)
+   service_request_status: character varying(20)
+   satusehat_encounter_id: character varying(100)
+   satusehat_service_request_id: character varying(100)
+   practitioner_nik: character varying(16)
+   practitioner_name: character varying(200)
+   satusehat_practitioner_id: character varying(100)
+   satusehat_location_id: character varying(100)
+
+============================================================
+ DATA INSERTION TESTS
+============================================================
+
+----------------------------------------
+ Testing Data Insertion via simrs-order-ui (localhost:5532)
+----------------------------------------
+🧪 Using test order ID: 3efb2fae-54cb-46e0-bf8c-a30ce03a48b1
+
+   Testing Single character (1 chars)...
+   ✅ Success: 'a'
+
+   Testing Short string (10 chars)...
+   ✅ Success: 'test-short'
+
+   Testing 20 characters (old limit) (20 chars)...
+   ✅ Success: 'aaaaaaaaaaaaaaaaaaaa'
+
+   Testing 50 characters (50 chars)...
+   ✅ Success: 'aaaaaaaaaaaaaaaaaaaa...'
+
+   Testing UUID format (36 chars) (36 chars)...
+   ✅ Success: '550e8400-e29b-41d4-a...'
+
+   Testing 100 characters (new limit) (100 chars)...
+   ✅ Success: 'aaaaaaaaaaaaaaaaaaaa...'
+
+============================================================
+ ANALYSIS COMPLETE
+============================================================
+📋 Summary:
+   - Successful connections: 1
+   - Working configuration: simrs-order-ui (localhost:5532)
+
+💡 Next steps:
+   1. Restart simrs-order-ui application
+   2. Test the PATCH endpoint with various payloads
+   3. Monitor application logs for any remaining issues
