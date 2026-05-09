@@ -1,4 +1,3 @@
-﻿/api/*          https://dev-pacs-backend.satupintudigital.co.id/api/:splat          200
-/backend-api/*  https://dev-pacs-backend.satupintudigital.co.id/backend-api/:splat  200
-/wado-rs/*      https://dev-pacs-backend.satupintudigital.co.id/wado-rs/:splat      200
-/*              /index.html                                       200
+﻿/api/*          https://dev-pacs-backend.satupintudigital.co.id/api/:splat          302
+/backend-api/*  https://dev-pacs-backend.satupintudigital.co.id/backend-api/:splat  302
+/wado-rs/*      https://dev-pacs-backend.satupintudigital.co.id/wado-rs/:splat      302
