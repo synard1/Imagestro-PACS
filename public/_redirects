@@ -1,9 +1,4 @@
-# --- API Proxying ---
-# Proxy all frontend requests to the remote API Gateway
-/api/*          https://dev-pacs-backend.satupintudigital.co.id/api/:splat          200
+﻿/api/*          https://dev-pacs-backend.satupintudigital.co.id/api/:splat          200
 /backend-api/*  https://dev-pacs-backend.satupintudigital.co.id/backend-api/:splat  200
 /wado-rs/*      https://dev-pacs-backend.satupintudigital.co.id/wado-rs/:splat      200
-
-# --- SPA Routing ---
-# Ensure all other requests return index.html for client-side routing
 /*              /index.html                                       200
