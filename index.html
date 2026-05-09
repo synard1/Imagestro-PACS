@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>%VITE_APP_NAME%</title>
+
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+</head>
+
+<body class="bg-slate-50">
+  <div id="root"></div>
+
+  <!-- Connection Monitor - DISABLED -->
+  <!-- This was causing repeated health check requests -->
+  <!-- Re-enable if you need development server monitoring -->
+  <!--
+    <script>
+      // Inline connection monitor for immediate server detection
+      (function() {
+        // Only run in development
+        const isDev = window.location.hostname === 'localhost' || 
+                     window.location.hostname === '127.0.0.1' || 
+                     window.location.port === '5173';
+        
+        if (!isDev) return;
+        
+        console.log('[ConnectionMonitor] Starting immediate connection monitoring');
+        
+        let isOnline = true;
+        let notificationElement = null;
+        let checkInterval = null;
+        
+        function checkConnection() {
+          fetch('/', {
+            method: 'HEAD',
+            cache: 'no-cache',
+            signal: AbortSignal.timeout(1500)
+          })
+          .then(response => {
+            if (response.ok && !isOnline) {
+              handleOnline();
+            }
+          })
+          .catch(error => {
+            if (isOnline) {
+              handleOffline();
+            }
+          });
+        }
+        
+        function handleOnline() {
+          console.log('[ConnectionMonitor] Server back online');
+          isOnline = true;
+          hideNotification();
+          showToast('Development server is back online!', '#10b981');
+        }
+        
+        function handleOffline() {
+          console.log('[ConnectionMonitor] Server offline detected');
+          isOnline = false;
+          showNotification();
+          showToast('Development server offline!', '#ef4444');
+        }
+        
+        function showNotification() {
+          if (notificationElement) return;
+          
+          notificationElement = document.createElement('div');
+          notificationElement.innerHTML = `
+            <div style="
+              position: fixed;
+              top: 0;
+              left: 0;
+              right: 0;
+              bottom: 0;
+              background: rgba(0, 0, 0, 0.85);
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              z-index: 999999;
+              font-family: system-ui, -apple-system, sans-serif;
+            ">
+              <div style="
+                background: white;
+                border-radius: 16px;
+                padding: 40px;
+                max-width: 420px;
+                width: 90%;
+                text-align: center;
+                box-shadow: 0 25px 50px rgba(0, 0, 0, 0.3);
+                animation: popIn 0.3s ease-out;
+              ">
+                <div style="
+                  width: 80px;
+                  height: 80px;
+                  background: linear-gradient(135deg, #fee2e2, #fecaca);
+                  border-radius: 50%;
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  margin: 0 auto 24px;
+                ">
+                  <svg width="40" height="40" viewBox="0 0 24 24" fill="#dc2626">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+                  </svg>
+                </div>
+                
+                <h2 style="
+                  margin: 0 0 16px;
+                  font-size: 24px;
+                  font-weight: 700;
+                  color: #1f2937;
+                ">Development Server Offline</h2>
+                
+                <p style="
+                  margin: 0 0 32px;
+                  color: #6b7280;
+                  line-height: 1.6;
+                  font-size: 16px;
+                ">
+                  The development server has stopped running. Please restart it to continue development.
+                </p>
+                
+                <div style="
+                  background: #f8fafc;
+                  border: 2px dashed #e2e8f0;
+                  border-radius: 12px;
+                  padding: 20px;
+                  margin-bottom: 32px;
+                  text-align: left;
+                ">
+                  <div style="font-weight: 600; margin-bottom: 12px; color: #374151; font-size: 14px;">
+                    💻 To restart the server:
+                  </div>
+                  <div style="
+                    font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+                    background: #1e293b;
+                    color: #e2e8f0;
+                    padding: 12px 16px;
+                    border-radius: 8px;
+                    font-size: 14px;
+                    font-weight: 500;
+                  ">
+                    npm run dev
+                  </div>
+                </div>
+                
+                <div style="display: flex; gap: 12px; justify-content: center;">
+                  <button onclick="window.connectionMonitorCheck()" style="
+                    background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+                    color: white;
+                    border: none;
+                    padding: 14px 28px;
+                    border-radius: 10px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    font-size: 14px;
+                    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+                    transition: all 0.2s;
+                  " onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
+                    🔄 Check Connection
+                  </button>
+                  <button onclick="window.connectionMonitorHide()" style="
+                    background: #f1f5f9;
+                    color: #64748b;
+                    border: 2px solid #e2e8f0;
+                    padding: 14px 28px;
+                    border-radius: 10px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    font-size: 14px;
+                    transition: all 0.2s;
+                  " onmouseover="this.style.background='#e2e8f0'" onmouseout="this.style.background='#f1f5f9'">
+                    ✕ Dismiss
+                  </button>
+                </div>
+                
+                <div style="
+                  margin-top: 24px;
+                  font-size: 13px;
+                  color: #9ca3af;
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  gap: 8px;
+                ">
+                  <div style="
+                    width: 8px;
+                    height: 8px;
+                    background: #ef4444;
+                    border-radius: 50%;
+                    animation: pulse 2s infinite;
+                  "></div>
+                  Checking connection every 2 seconds...
+                </div>
+              </div>
+            </div>
+            
+            <style>
+              @keyframes popIn {
+                from { transform: scale(0.8); opacity: 0; }
+                to { transform: scale(1); opacity: 1; }
+              }
+              @keyframes pulse {
+                0%, 100% { opacity: 1; }
+                50% { opacity: 0.5; }
+              }
+            </style>
+          `;
+          
+          document.body.appendChild(notificationElement);
+        }
+        
+        function hideNotification() {
+          if (notificationElement) {
+            notificationElement.remove();
+            notificationElement = null;
+          }
+        }
+        
+        function showToast(message, color) {
+          const toast = document.createElement('div');
+          toast.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: ${color};
+            color: white;
+            padding: 16px 24px;
+            border-radius: 12px;
+            font-family: system-ui, -apple-system, sans-serif;
+            font-size: 14px;
+            font-weight: 600;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+            z-index: 1000000;
+            animation: slideInRight 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+          `;
+          
+          toast.textContent = message;
+          
+          if (!document.querySelector('#toast-animations')) {
+            const style = document.createElement('style');
+            style.id = 'toast-animations';
+            style.textContent = `
+              @keyframes slideInRight {
+                from { transform: translateX(100%) scale(0.8); opacity: 0; }
+                to { transform: translateX(0) scale(1); opacity: 1; }
+              }
+            `;
+            document.head.appendChild(style);
+          }
+          
+          document.body.appendChild(toast);
+          
+          setTimeout(() => {
+            if (toast.parentNode) {
+              toast.style.animation = 'slideInRight 0.3s reverse';
+              setTimeout(() => toast.remove(), 300);
+            }
+          }, 3000);
+        }
+        
+        // Global functions for notification buttons
+        window.connectionMonitorCheck = checkConnection;
+        window.connectionMonitorHide = hideNotification;
+        
+        // Start monitoring
+        checkConnection(); // Initial check
+        checkInterval = setInterval(checkConnection, 2000);
+        
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+          if (checkInterval) {
+            clearInterval(checkInterval);
+          }
+        });
+        
+        console.log('[ConnectionMonitor] Immediate monitoring started');
+      })();
+    </script>
+    -->
+
+  <script type="module" src="/src/main.jsx"></script>
+</body>
+
+</html>
