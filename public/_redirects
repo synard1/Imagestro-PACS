@@ -1,3 +1,8 @@
-﻿/api/*          https://dev-pacs-backend.satupintudigital.co.id/api/:splat          200
-/backend-api/*  https://dev-pacs-backend.satupintudigital.co.id/backend-api/:splat  200
-/wado-rs/*      https://dev-pacs-backend.satupintudigital.co.id/wado-rs/:splat      200
+﻿# API Proxy - Handled by Cloudflare Worker
+# Worker routes: /api/*, /backend-api/*, /wado-rs/*
+# These rules are commented out because Cloudflare Pages cannot proxy to external URLs
+# The Cloudflare Worker (cloudflare/worker.js) handles the proxying instead
+#
+# /api/*          https://dev-pacs-backend.satupintudigital.co.id/api/:splat          200
+# /backend-api/*  https://dev-pacs-backend.satupintudigital.co.id/backend-api/:splat  200
+# /wado-rs/*      https://dev-pacs-backend.satupintudigital.co.id/wado-rs/:splat      200

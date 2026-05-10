@@ -1,0 +1,24 @@
+name = "imagestro-pacs-proxy"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+# Routes - bind this worker to specific paths on your Pages domain
+# These routes will be configured in Cloudflare Dashboard after deployment
+# Or use: wrangler deploy --route "imagestro-pacs.pages.dev/backend-api/*"
+
+# Worker will handle:
+# - imagestro-pacs.pages.dev/backend-api/*
+# - imagestro-pacs.pages.dev/api/*
+# - imagestro-pacs.pages.dev/wado-rs/*
+
+# Environment variables (optional - currently hardcoded in worker.js)
+# [vars]
+# BACKEND_URL = "https://dev-pacs-backend.satupintudigital.co.id"
+
+# Development settings
+[env.development]
+name = "imagestro-pacs-proxy-dev"
+
+# Production settings
+[env.production]
+name = "imagestro-pacs-proxy"
