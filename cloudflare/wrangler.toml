@@ -3,13 +3,17 @@ main = "worker.js"
 compatibility_date = "2024-01-01"
 
 # Routes - bind this worker to specific paths on your Pages domain
-# These routes will be configured in Cloudflare Dashboard after deployment
-# Or use: wrangler deploy --route "imagestro-pacs.pages.dev/backend-api/*"
+# IMPORTANT: Routes require zone_id or zone_name to work
+# For now, configure routes manually in Cloudflare Dashboard:
+# Workers & Pages → imagestro-pacs-proxy → Settings → Triggers → Routes
 
 # Worker will handle:
 # - imagestro-pacs.pages.dev/backend-api/*
 # - imagestro-pacs.pages.dev/api/*
 # - imagestro-pacs.pages.dev/wado-rs/*
+
+# Note: Routes in wrangler.toml require zone_id which we don't have yet
+# Alternative: Use Cloudflare Dashboard to add routes manually
 
 # Environment variables (optional - currently hardcoded in worker.js)
 # [vars]
