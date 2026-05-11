@@ -27,6 +27,8 @@ npm-debug.log*
 .gemini/
 .gemini_security/
 .wt/
+.wrangler/
+**/ .wrangler/
 
 # Project Specific
 /data/
