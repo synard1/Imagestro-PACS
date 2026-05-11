@@ -4,20 +4,37 @@ export async function onRequest(context) {
   const { request } = context;
   const url = new URL(request.url);
 
-  // Strip /backend-api prefix to match local behavior
+  // Strip /backend-api prefix
   const backendPath = url.pathname.replace(/^\/backend-api/, '');
   const backendUrl = `${BACKEND_URL}${backendPath}${url.search}`;
 
   console.log(`[Proxy] ${request.method} ${url.pathname} -> ${backendUrl}`);
 
-  // Forward critical headers
-  const headers = new Headers(request.headers);
-  headers.delete('host'); // Let fetch set the correct host for the backend
+  // MINIMALIST HEADERS: Only forward what is absolutely necessary
+  const headers = new Headers();
+  
+  // 1. Authorization (Bearer token)
+  const auth = request.headers.get('authorization');
+  if (auth) headers.set('authorization', auth);
+  
+  // 2. Tenant Context
+  const tenant = request.headers.get('x-tenant-id');
+  if (tenant) headers.set('x-tenant-id', tenant);
+  
+  // 3. API Key
+  const apiKey = request.headers.get('x-api-key');
+  if (apiKey) headers.set('x-api-key', apiKey);
 
-  // Log critical auth info
-  const auth = headers.get('authorization');
+  // 4. Content Type (for POST/PUT)
+  const contentType = request.headers.get('content-type');
+  if (contentType) headers.set('content-type', contentType);
+
+  // 5. Accept
+  const accept = request.headers.get('accept');
+  if (accept) headers.set('accept', accept);
+
   console.log(`[Proxy Auth] Authorization present: ${!!auth} (len: ${auth?.length || 0})`);
-  console.log(`[Proxy Auth] X-Tenant-ID: ${headers.get('x-tenant-id')}`);
+  console.log(`[Proxy Auth] X-Tenant-ID: ${tenant}`);
 
   try {
     const backendResponse = await fetch(backendUrl, {
@@ -29,10 +46,7 @@ export async function onRequest(context) {
 
     console.log(`[Proxy Response] Backend returned: ${backendResponse.status}`);
 
-    // Copy all response headers
     const responseHeaders = new Headers(backendResponse.headers);
-    
-    // Ensure CORS headers are correct for the Pages origin
     responseHeaders.set('Access-Control-Allow-Origin', url.origin);
     responseHeaders.set('Access-Control-Allow-Credentials', 'true');
     responseHeaders.set('Access-Control-Expose-Headers', '*');
