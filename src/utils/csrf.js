@@ -105,7 +105,7 @@ export const fetchCSRFToken = async () => {
       const expiresIn = data.expires_in || 3600; // Default 1 hour
       
       console.debug('[CSRF] Token received:', {
-        tokenPreview: token ? token.substring(0, 20) + '...' : 'null',
+        hasToken: !!token,
         expiresIn: expiresIn + 's'
       });
       
@@ -231,7 +231,7 @@ export const addCSRFHeader = async (headers = {}) => {
   
   // Only add header if token is available
   if (token) {
-    console.debug('[CSRF] ✅ Token attached to headers:', token.substring(0, 20) + '...');
+    console.debug('[CSRF] ✅ Token attached to headers: [REDACTED]');
     return {
       ...headers,
       'X-CSRF-Token': token

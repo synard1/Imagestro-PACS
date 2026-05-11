@@ -309,7 +309,6 @@ export const updateDoctor = async (doctorId, doctorData) => {
   }
 
   console.debug('[doctorService] Updating doctor in backend API:', doctorId);
-  console.debug('[doctorService] Update payload:', doctorData);
 
   try {
     const client = apiClient('doctors');
@@ -321,7 +320,7 @@ export const updateDoctor = async (doctorId, doctorData) => {
       try {
         console.debug('[doctorService] Trying update endpoint:', ep);
         const response = await client.put(ep, doctorData);
-        console.debug('[doctorService] Update response:', response);
+        console.debug('[doctorService] Update response status:', response?.status);
 
         if (response && response.status === 'success') {
           const doctor = response.data?.doctor || response.doctor || response.data;

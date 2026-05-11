@@ -331,13 +331,13 @@ export async function updateExternalSystem(id, data) {
   }
 
   try {
-    console.log('[externalSystemsService] updateExternalSystem called with:', { id, data });
+    console.log('[externalSystemsService] updateExternalSystem called with id:', id);
     const client = getClient();
     const url = `/external-systems/${encodeURIComponent(id)}`;
-    console.log('[externalSystemsService] Making PUT request to:', url, 'with data:', data);
+    console.log('[externalSystemsService] Making PUT request to:', url);
     const backendData = mapToBackend(data);
     const response = await client.put(url, backendData);
-    console.log('[externalSystemsService] Response:', response);
+    console.log('[externalSystemsService] Response status:', response?.status);
     logger.info('[externalSystemsService]', 'Updated external system', { id });
     const system = response?.system || response;
     return mapToFrontend(system);

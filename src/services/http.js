@@ -53,9 +53,9 @@ function getProxiedUrl(url) {
   }
   
   // In development, convert backend URLs to use Vite proxy
-  const pacsBackendUrl = import.meta.env.VITE_MAIN_PACS_API_BACKEND_URL || 'http://103.42.117.19:8888';
-  if (isDev && (url.includes('103.42.117.19:8888') || url.startsWith(pacsBackendUrl))) {
-    const path = url.replace(pacsBackendUrl, '').replace('http://103.42.117.19:8888', '');
+  const pacsBackendUrl = import.meta.env.VITE_MAIN_PACS_API_BACKEND_URL || (isDev ? 'http://localhost:8888' : '');
+  if (isDev && pacsBackendUrl && url.startsWith(pacsBackendUrl)) {
+    const path = url.replace(pacsBackendUrl, '');
     console.debug(`[http] Converting to proxy URL: ${url} -> /backend-api${path}`);
     return `/backend-api${path}`;
   }
@@ -370,8 +370,8 @@ export function apiClient(moduleName) {
     try {
       logDebug(cfg, moduleName, { method, url, request: data });
       
-      console.debug(`[http] Making fetch request to ${url} with options:`, options);
-      
+      console.debug(`[http] Making fetch request to ${url} with options:`, redactSensitiveData(options));
+
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), cfg.timeoutMs || 6000);
       
@@ -380,7 +380,7 @@ export function apiClient(moduleName) {
       const response = await fetch(url, options);
       clearTimeout(timeoutId);
       
-      console.debug(`[http] Fetch response received from ${url}:`, response);
+      console.debug(`[http] Fetch response received from ${url}:`, { status: response.status, ok: response.ok });
 
       if (!response.ok) {
         const errorText = await response.text();
