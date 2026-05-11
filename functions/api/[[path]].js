@@ -28,11 +28,10 @@ export async function onRequest(context) {
   const { request, env } = context;
   const url = new URL(request.url);
 
-  // Strip /backend-api prefix to match local Vite proxy behavior
-  const backendPath = url.pathname.replace(/^\/backend-api/, '');
-  const backendUrl = `${BACKEND_URL}${backendPath}${url.search}`;
+  // Keep prefix for /api/ and /wado-rs/ (matches local Vite proxy behavior)
+  const backendUrl = `${BACKEND_URL}${url.pathname}${url.search}`;
 
-  console.log(`[Proxy] ${request.method} ${url.pathname} -> ${backendUrl}`);
+  console.log(`[Proxy-API] ${request.method} ${url.pathname} -> ${backendUrl}`);
 
   try {
     // Prepare headers to forward
@@ -44,7 +43,7 @@ export async function onRequest(context) {
       }
     });
 
-    // Add X-Forwarded headers for backend logging
+    // Add X-Forwarded headers
     headers.set('X-Forwarded-For', request.headers.get('cf-connecting-ip') || '');
     headers.set('X-Forwarded-Proto', url.protocol.replace(':', ''));
     headers.set('X-Forwarded-Host', url.hostname);
@@ -63,8 +62,6 @@ export async function onRequest(context) {
 
     // Prepare response headers
     const responseHeaders = new Headers();
-
-    // Copy specific headers from backend response
     RESPONSE_HEADERS.forEach(header => {
       const value = backendResponse.headers.get(header);
       if (value) {
@@ -77,7 +74,6 @@ export async function onRequest(context) {
     responseHeaders.set('Access-Control-Allow-Credentials', 'true');
     responseHeaders.set('Access-Control-Expose-Headers', 'Content-Length, Content-Type, X-CSRF-Token');
 
-    // Return response
     return new Response(backendResponse.body, {
       status: backendResponse.status,
       statusText: backendResponse.statusText,
@@ -85,9 +81,9 @@ export async function onRequest(context) {
     });
 
   } catch (error) {
-    console.error('[Proxy Error]', error);
+    console.error('[Proxy-API Error]', error);
     return new Response(JSON.stringify({
-      error: 'Pages Function Proxy Error',
+      error: 'Pages Function API Proxy Error',
       message: error.message,
       path: url.pathname,
       target: backendUrl
