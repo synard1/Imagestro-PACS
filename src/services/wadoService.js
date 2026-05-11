@@ -4,23 +4,27 @@
  */
 
 import { loadRegistry } from './api-registry';
+import { getConfigSync } from './config';
 import { isCached, getCachedImage, cacheImage } from './dicomImageCacheService';
 import { getAuthHeader } from './auth-storage';
 
 const getWadoBaseUrl = () => {
   const registry = loadRegistry();
   const studiesConfig = registry.studies || {};
+  const { apiBaseUrl } = getConfigSync();
   
   // Try registry first
   let baseUrl = studiesConfig.baseUrl;
   
-  // If no registry baseUrl, check if we should use relative path (proxied)
+  // If no registry baseUrl, use the standard prefixed path
   if (!baseUrl) {
-    if (typeof window !== 'undefined') {
-       // In our architecture, /wado-rs is always the proxy path in Vite/Nginx
-       return '/wado-rs';
-    }
-    baseUrl = import.meta.env.VITE_MAIN_API_BACKEND_URL || '';
+    // If apiBaseUrl is empty, default to /backend-api for consistency with apiClient
+    // This ensures all WADO requests go through the gateway
+    const prefix = apiBaseUrl || "/backend-api";
+    const cleanPrefix = prefix.replace(/\/$/, '');
+    
+    // In our architecture, /wado-rs is the standard suffix for DICOMweb
+    return `${cleanPrefix}/wado-rs`;
   }
 
   // Ensure no trailing slash
@@ -31,8 +35,14 @@ const getWadoBaseUrl = () => {
     return cleanBaseUrl.endsWith('/wado-rs') ? cleanBaseUrl : `${cleanBaseUrl}/wado-rs`;
   }
   
-  // If it's empty or relative, just return it (assuming it's already /wado-rs or similar)
-  return cleanBaseUrl || '/wado-rs';
+  // If it's a relative path and doesn't contain wado-rs, append it
+  // This helps when baseUrl is just "/backend-api" or similar
+  if (cleanBaseUrl && !cleanBaseUrl.includes('wado-rs')) {
+     return `${cleanBaseUrl}/wado-rs`;
+  }
+  
+  // Return the base URL as is (assuming it's already /wado-rs or similar)
+  return cleanBaseUrl;
 };
 
 // Helper to get headers including auth
