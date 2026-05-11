@@ -29,9 +29,10 @@ export function useSatusehatAuth() {
         // Try to get a new token via local backend proxy (requires Basic auth)
         const dataCfg = getDataStorageConfig();
         const serverUrl = dataCfg?.serverConfig?.serverUrl || 'http://localhost:3001';
-        const basicAuth = dataCfg?.serverConfig?.username
-          ? 'Basic ' + btoa(`${dataCfg.serverConfig.username}:${dataCfg.serverConfig.password || ''}`)
-          : 'Basic ' + btoa('admin:password123');
+        if (!dataCfg?.serverConfig?.username) {
+          throw new Error('SatuSehat server credentials not configured');
+        }
+        const basicAuth = 'Basic ' + btoa(`${dataCfg.serverConfig.username}:${dataCfg.serverConfig.password || ''}`);
 
         const response = await fetch(`${serverUrl.replace(/\/+$/, '')}/api/satusehat/token`, {
           method: 'POST',

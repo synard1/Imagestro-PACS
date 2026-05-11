@@ -79,7 +79,7 @@ export const fetchCSRFToken = async () => {
       const headers = getAuthHeaders();
       
       console.debug('[CSRF] Fetching token from:', url);
-      console.debug('[CSRF] Request headers:', headers);
+      console.debug('[CSRF] Request headers:', { ...headers, Authorization: headers.Authorization ? '[REDACTED]' : undefined });
       
       const response = await fetch(url, {
         method: 'GET',

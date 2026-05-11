@@ -119,7 +119,7 @@ export async function fetchJson(path, options={}) {
   }
 
   const authHeader = getAuthHeader();
-  console.debug('[HTTP] Auth Header:', authHeader);
+  console.debug('[HTTP] Auth Header:', { Authorization: authHeader.Authorization ? '[REDACTED]' : 'none' });
 
   const opt = {
     ...options,

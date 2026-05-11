@@ -95,6 +95,6 @@ export function getAuthHeader() {
   }
   const scheme = a.token_type || 'Bearer';
   const header = { Authorization: `${scheme} ${a.access_token}` };
-  console.debug('[AUTH-STORAGE] Auth header returning:', header);
+  console.debug('[AUTH-STORAGE] Auth header returning:', { Authorization: '[REDACTED]' });
   return header;
 }
