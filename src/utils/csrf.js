@@ -50,6 +50,12 @@ const getAuthHeaders = () => {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
+  // Add Tenant context for Superadmins (must match http.js logic)
+  const selectedTenantId = localStorage.getItem('superadmin_selected_tenant');
+  if (selectedTenantId) {
+    headers['X-Tenant-ID'] = selectedTenantId;
+  }
+
   return headers;
 };
 

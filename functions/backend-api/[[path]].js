@@ -1,29 +1,15 @@
 const BACKEND_URL = 'https://dev-pacs-backend.satupintudigital.co.id';
 
-// Headers to forward from client to backend
-const FORWARD_HEADERS = [
-  'authorization',
-  'content-type',
-  'cookie',
-  'x-csrf-token',
-  'x-tenant-id',
-  'x-api-key',
-  'x-requested-with',
-  'accept',
-  'accept-language',
-  'cache-control',
-  'user-agent'
-];
-
-// Headers to forward from backend to client
-const RESPONSE_HEADERS = [
-  'content-type',
-  'content-length',
-  'cache-control',
-  'set-cookie',
-  'x-csrf-token',
-  'etag',
-  'last-modified'
+// Headers that should NOT be forwarded to the backend
+const IGNORE_HEADERS = [
+  'host',
+  'cf-ray',
+  'cf-connecting-ip',
+  'cf-ipcountry',
+  'cf-visitor',
+  'x-forwarded-for',
+  'x-forwarded-proto',
+  'x-real-ip'
 ];
 
 export async function onRequest(context) {
@@ -37,20 +23,27 @@ export async function onRequest(context) {
   console.log(`[Proxy] ${request.method} ${url.pathname} -> ${backendUrl}`);
 
   try {
-    // Prepare headers to forward
+    // Forward ALL headers from the client to the backend, except ignored ones
     const headers = new Headers();
-    FORWARD_HEADERS.forEach(header => {
-      const value = request.headers.get(header);
-      if (value) {
-        headers.set(header, value);
+    for (const [key, value] of request.headers.entries()) {
+      if (!IGNORE_HEADERS.includes(key.toLowerCase())) {
+        headers.set(key, value);
       }
-    });
+    }
 
     // Add X-Forwarded headers for backend logging
     headers.set('X-Forwarded-For', request.headers.get('cf-connecting-ip') || '');
     headers.set('X-Forwarded-Proto', url.protocol.replace(':', ''));
     headers.set('X-Forwarded-Host', url.hostname);
     headers.set('X-Real-IP', request.headers.get('cf-connecting-ip') || '');
+
+    // Debug: Log important headers (redacted)
+    const authHeaderValue = headers.get('authorization');
+    const hasAuth = !!authHeaderValue;
+    const authPrefix = authHeaderValue ? authHeaderValue.substring(0, 15) : 'none';
+    const authLength = authHeaderValue ? authHeaderValue.length : 0;
+    const tenantId = headers.get('x-tenant-id');
+    console.log(`[Proxy Debug] Auth: ${hasAuth} (Prefix: ${authPrefix}, Len: ${authLength}), Tenant: ${tenantId}`);
 
     // Create backend request
     const backendRequest = new Request(backendUrl, {
@@ -64,20 +57,12 @@ export async function onRequest(context) {
     const backendResponse = await fetch(backendRequest);
 
     // Prepare response headers
-    const responseHeaders = new Headers();
+    const responseHeaders = new Headers(backendResponse.headers);
 
-    // Copy specific headers from backend response
-    RESPONSE_HEADERS.forEach(header => {
-      const value = backendResponse.headers.get(header);
-      if (value) {
-        responseHeaders.set(header, value);
-      }
-    });
-
-    // Add CORS headers
+    // Add CORS headers (ensuring they are set correctly for pages.dev origin)
     responseHeaders.set('Access-Control-Allow-Origin', url.origin);
     responseHeaders.set('Access-Control-Allow-Credentials', 'true');
-    responseHeaders.set('Access-Control-Expose-Headers', 'Content-Length, Content-Type, X-CSRF-Token');
+    responseHeaders.set('Access-Control-Expose-Headers', 'Content-Length, Content-Type, X-CSRF-Token, X-Tenant-ID');
 
     // Return response
     return new Response(backendResponse.body, {
