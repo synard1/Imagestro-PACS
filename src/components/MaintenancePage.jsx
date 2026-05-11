@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { safeRedirect } from '../utils/safeRedirect';
 
 /**
  * MaintenancePage - React component for displaying maintenance/offline page
@@ -64,9 +65,9 @@ const MaintenancePage = ({
         if (onRetry) {
           onRetry();
         } else {
-          // Default behavior: redirect to original URL
+          // Default behavior: redirect to original URL (validated same-origin)
           setTimeout(() => {
-            window.location.href = originalUrl;
+            safeRedirect(originalUrl, '/');
           }, 1500);
         }
         return;
@@ -147,7 +148,7 @@ const MaintenancePage = ({
           if (onRetry) {
             onRetry();
           } else {
-            window.location.href = event.data.originalUrl || originalUrl;
+            safeRedirect(event.data.originalUrl || originalUrl, '/');
           }
         }, 1000);
       }
@@ -170,7 +171,7 @@ const MaintenancePage = ({
             if (onRetry) {
               onRetry();
             } else {
-              window.location.href = originalUrl;
+              safeRedirect(originalUrl, '/');
             }
           }, 1000);
         }

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { clearOnLogin } from '../services/storageManager'
 import { useNavigate, useLocation } from 'react-router-dom'
+import { safeRedirect } from '../utils/safeRedirect'
 import { performLogin, initializeAuthAfterLogin, clearAuthBeforeLogin } from '../services/loginService'
 import { logger } from '../utils/logger'
 import { useTheme } from '../hooks/useTheme'
@@ -75,9 +76,9 @@ export default function Login() {
       // Clear storage and navigate
       try { clearOnLogin() } catch { }
 
-      // Force full page reload to load authenticated App
-      // This ensures we switch from minimal LoginApp to full App with all services
-      window.location.href = from
+      // Force full page reload to load authenticated App.
+      // Validate redirect target is same-origin to prevent open redirect.
+      safeRedirect(from, '/dashboard')
     } catch (err) {
       logger.error('Login failed:', err)
       let errorMessage = err.message || 'Login failed'

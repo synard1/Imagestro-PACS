@@ -2,7 +2,8 @@ import { apiClient } from './http'
 import { loadRegistry } from './api-registry'
 import { onNotify } from './notifications'
 import { logger } from '../utils/logger'
-import { getAuthHeader } from './auth-storage'  // Import the auth header function
+import { getAuthHeader } from './auth-storage'
+import { addCSRFHeader } from '../utils/csrf'
 
 /**
  * Upload Service
@@ -320,20 +321,20 @@ export class UploadService {
       }
       formData.append('metadata', JSON.stringify(metadataObj))
 
-      // Upload using direct fetch with proper authentication
-      const authHeaders = getAuthHeader()  // Use the proper auth header function
-      
+      // Upload using direct fetch with proper authentication + CSRF
+      const authHeaders = getAuthHeader()
+      const csrfHeaders = await addCSRFHeader(authHeaders)
+
       const url = `${config.baseUrl}/orders/${orderId}/files`
       logger.info('[UploadService] Uploading to:', url)
-      
-      // Add timeout to fetch request
+
       const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 30000) // 30 second timeout
-      
+      const timeoutId = setTimeout(() => controller.abort(), 30000)
+
       const response = await fetch(url, {
         method: 'POST',
         headers: {
-          ...authHeaders  // Use proper auth headers (do not set Content-Type for FormData)
+          ...csrfHeaders  // includes auth + CSRF (no Content-Type — let browser set for FormData)
         },
         body: formData,
         signal: controller.signal
@@ -797,17 +798,16 @@ export class UploadService {
 
       if (ordersConfig?.enabled) {
         try {
-          // Delete from backend with proper authentication
+          // Delete from backend with authentication + CSRF protection
           const authHeaders = getAuthHeader()
-          
-          // Use the correct endpoint according to order-files.md documentation:
-          // DELETE /orders/{identifier}/files/{file_id}
+          const csrfHeaders = await addCSRFHeader(authHeaders)
+
           const url = `${ordersConfig.baseUrl}/orders/${orderId}/files/${fileId}`
-          
+
           const response = await fetch(url, {
             method: 'DELETE',
             headers: {
-              ...authHeaders,
+              ...csrfHeaders,
               'Content-Type': 'application/json'
             }
           })
