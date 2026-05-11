@@ -23,6 +23,7 @@ import HL7Configuration from '../components/hl7/HL7Configuration'
 import NotificationSettings from '../components/settings/NotificationSettings'
 import PWASettings from '../components/settings/PWASettings'
 import { setCurrentUser } from '../services/rbac'
+import { getEncrypted, setEncrypted, removeEncrypted } from '../utils/encryptedStorage'
 
 // DEPRECATED: Old notification methods - kept for fallback only
 // import { loadNotificationConfig, saveNotificationConfig, testTelegramNotification, testWhatsappNotification, simulateNotification } from '../services/notificationLogicService'
@@ -189,24 +190,8 @@ export default function Settings() {
   //   stagnantThresholdMinutes: 60
   // });
 
-  // Load SatuSehat token from localStorage on component mount
-  const [satusehatToken, setSatusehatToken] = useState(() => {
-    const savedToken = localStorage.getItem('satusehat_token');
-    const savedExpiry = localStorage.getItem('satusehat_token_expiry');
-
-    if (savedToken && savedExpiry) {
-      const expiryDate = new Date(parseInt(savedExpiry));
-      // Check if token is still valid (not expired)
-      if (expiryDate > new Date()) {
-        return savedToken;
-      } else {
-        // Token expired, remove it
-        localStorage.removeItem('satusehat_token');
-        localStorage.removeItem('satusehat_token_expiry');
-      }
-    }
-    return null;
-  });
+  // Load SatuSehat token from encrypted storage on component mount
+  const [satusehatToken, setSatusehatToken] = useState(null);
 
   // Load PWA configuration from localStorage
   useEffect(() => {
@@ -236,21 +221,7 @@ export default function Settings() {
     loadPWAConfig()
   }, [])
 
-  const [tokenExpiry, setTokenExpiry] = useState(() => {
-    const savedExpiry = localStorage.getItem('satusehat_token_expiry');
-    if (savedExpiry) {
-      const expiryDate = new Date(parseInt(savedExpiry));
-      // Check if token is still valid (not expired)
-      if (expiryDate > new Date()) {
-        return expiryDate;
-      } else {
-        // Token expired, remove it
-        localStorage.removeItem('satusehat_token');
-        localStorage.removeItem('satusehat_token_expiry');
-      }
-    }
-    return null;
-  });
+  const [tokenExpiry, setTokenExpiry] = useState(null);
 
   // Integration sub-tab state
   const [activeIntegrationTab, setActiveIntegrationTab] = useState('dicom');
@@ -373,23 +344,21 @@ export default function Settings() {
   }, [])
 
   useEffect(() => {
-    // Check token validity on component mount
-    const savedToken = localStorage.getItem('satusehat_token');
-    const savedExpiry = localStorage.getItem('satusehat_token_expiry');
-
-    if (savedToken && savedExpiry) {
-      const expiryDate = new Date(parseInt(savedExpiry));
-      // If token is expired, clear it
-      if (expiryDate <= new Date()) {
-        localStorage.removeItem('satusehat_token');
-        localStorage.removeItem('satusehat_token_expiry');
-        // Update state if needed
-        if (satusehatToken) {
-          setSatusehatToken(null);
-          setTokenExpiry(null);
+    // Load SatuSehat token from encrypted storage and check validity
+    const loadToken = async () => {
+      const tokenData = await getEncrypted('satusehat_token');
+      if (tokenData?.token && tokenData?.expiresAt) {
+        const expiryDate = new Date(tokenData.expiresAt);
+        if (expiryDate > new Date()) {
+          setSatusehatToken(tokenData.token);
+          setTokenExpiry(expiryDate);
+        } else {
+          // Expired — clear it
+          removeEncrypted('satusehat_token');
         }
       }
-    }
+    };
+    loadToken();
   }, []);
 
   // DEPRECATED: Old notification config loading - replaced with NotificationSettings component
@@ -2497,11 +2466,13 @@ export default function Settings() {
                             const expiryTime = new Date();
                             expiryTime.setSeconds(expiryTime.getSeconds() + (tokenData.expires_in || 3600));
 
-                            // Save token to state and localStorage
+                            // Save token to state and encrypted storage
                             setSatusehatToken(tokenData.access_token);
                             setTokenExpiry(expiryTime);
-                            localStorage.setItem('satusehat_token', tokenData.access_token);
-                            localStorage.setItem('satusehat_token_expiry', expiryTime.getTime());
+                            await setEncrypted('satusehat_token', {
+                              token: tokenData.access_token,
+                              expiresAt: expiryTime.getTime()
+                            });
 
                             // Determine source message
                             const sourceMsg = response.source === 'cache'
@@ -2582,11 +2553,10 @@ export default function Settings() {
                           type="button"
                           className="px-3 py-1 bg-red-100 text-red-700 text-xs rounded hover:bg-red-200"
                           onClick={() => {
-                            // Clear token from state and localStorage
+                            // Clear token from state and encrypted storage
                             setSatusehatToken(null);
                             setTokenExpiry(null);
-                            localStorage.removeItem('satusehat_token');
-                            localStorage.removeItem('satusehat_token_expiry');
+                            removeEncrypted('satusehat_token');
                             alert('SatuSehat token has been cleared.');
                           }}
                         >

@@ -1,40 +1,39 @@
 import { api } from '../api'
+import { setEncrypted, getEncrypted, removeEncrypted } from '../utils/encryptedStorage'
 
 const STORAGE_KEY = 'satusehat_config'
 
-export const loadSatusehatConfig = () => {
+const DEFAULTS = {
+  enabled: false,
+  environment: 'STAGING',
+  clientId: '',
+  clientSecret: '',
+  organizationId: ''
+}
+
+// Async — clientSecret is sensitive, stored AES-GCM encrypted.
+export const loadSatusehatConfig = async () => {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY)
-    return stored ? JSON.parse(stored) : {
-      enabled: false,
-      environment: 'STAGING',
-      clientId: '',
-      clientSecret: '',
-      organizationId: ''
-    }
+    const stored = await getEncrypted(STORAGE_KEY)
+    return stored ?? { ...DEFAULTS }
   } catch (e) {
     console.warn('Failed to load SatuSehat config:', e)
-    return {
-      enabled: false,
-      environment: 'STAGING',
-      clientId: '',
-      clientSecret: '',
-      organizationId: ''
-    }
+    return { ...DEFAULTS }
   }
 }
 
 export const saveSatusehatConfig = async (config) => {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(config))
-    
-    // Also save to server if available
+    await setEncrypted(STORAGE_KEY, config)
+
+    // Also save to server (non-secret fields only)
     try {
-      await api.post('/api/satusehat/config', config)
+      const { clientSecret: _omit, ...safeConfig } = config
+      await api.post('/api/satusehat/config', safeConfig)
     } catch (e) {
       console.warn('Failed to save SatuSehat config to server:', e)
     }
-    
+
     return true
   } catch (e) {
     console.error('Failed to save SatuSehat config:', e)
@@ -43,5 +42,5 @@ export const saveSatusehatConfig = async (config) => {
 }
 
 export const clearSatusehatConfig = () => {
-  localStorage.removeItem(STORAGE_KEY)
+  removeEncrypted(STORAGE_KEY)
 }

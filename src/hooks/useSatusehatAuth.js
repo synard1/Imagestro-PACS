@@ -11,7 +11,7 @@ export function useSatusehatAuth() {
   useEffect(() => {
     const initAuth = async () => {
       try {
-        const config = loadSatusehatConfig();
+        const config = await loadSatusehatConfig();
         if (!config.enabled) {
           setIsAuthenticated(false);
           return;

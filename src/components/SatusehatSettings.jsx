@@ -3,17 +3,19 @@ import { toast } from 'react-toastify'
 import { loadSatusehatConfig, saveSatusehatConfig } from '../config/satusehatConfig'
 import { satusehatService } from '../services/satusehatService'
 
+const EMPTY_CONFIG = { enabled: false, environment: 'STAGING', clientId: '', clientSecret: '', organizationId: '' }
+
 export default function SatusehatSettings() {
-  const [config, setConfig] = useState(() => loadSatusehatConfig())
+  const [config, setConfig] = useState(EMPTY_CONFIG)
   const [status, setStatus] = useState(null)
   const [testing, setTesting] = useState(false)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    // Check connection status on mount if enabled
-    if (config.enabled) {
-      checkConnectionStatus()
-    }
+    loadSatusehatConfig().then(loaded => {
+      setConfig(loaded)
+      if (loaded.enabled) checkConnectionStatus()
+    })
   }, [])
 
   const handleChange = (field, value) => {
