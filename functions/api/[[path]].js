@@ -1,4 +1,4 @@
-const BACKEND_URL = 'http://100.113.207.79:8082';
+const BACKEND_URL = 'https://dev-pacs-backend.satupintudigital.co.id';
 
 export async function onRequest(context) {
   const { request } = context;
@@ -7,24 +7,11 @@ export async function onRequest(context) {
   // Keep /api prefix
   const backendUrl = `${BACKEND_URL}${url.pathname}${url.search}`;
 
-  console.log(`[Proxy-API-Debug] ${request.method} ${url.pathname} -> ${backendUrl}`);
+  console.log(`[Proxy-API] ${request.method} ${url.pathname} -> ${backendUrl}`);
 
-  // Critical headers to forward
-  const headers = new Headers();
-  const forwardList = [
-    'authorization',
-    'content-type',
-    'accept',
-    'x-tenant-id',
-    'x-api-key',
-    'x-csrf-token',
-    'cookie'
-  ];
-
-  for (const h of forwardList) {
-    const v = request.headers.get(h);
-    if (v) headers.set(h, v);
-  }
+  // Forward critical headers
+  const headers = new Headers(request.headers);
+  headers.delete('host'); // Let fetch set the correct host for the backend
 
   try {
     const backendResponse = await fetch(backendUrl, {
@@ -34,9 +21,13 @@ export async function onRequest(context) {
       redirect: 'manual'
     });
 
+    // Copy all response headers
     const responseHeaders = new Headers(backendResponse.headers);
+    
+    // Ensure CORS headers are correct for the Pages origin
     responseHeaders.set('Access-Control-Allow-Origin', url.origin);
     responseHeaders.set('Access-Control-Allow-Credentials', 'true');
+    responseHeaders.set('Access-Control-Expose-Headers', '*');
 
     return new Response(backendResponse.body, {
       status: backendResponse.status,
