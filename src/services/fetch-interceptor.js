@@ -20,9 +20,9 @@ function getProxiedUrl(url) {
   }
   
   // In development, convert backend URLs to use Vite proxy
-  const pacsBackendUrl = import.meta.env.VITE_MAIN_PACS_API_BACKEND_URL || 'http://103.42.117.19:8888';
-  if (isDev && (url.includes('103.42.117.19:8888') || url.startsWith(pacsBackendUrl))) {
-    const path = url.replace(pacsBackendUrl, '').replace('http://103.42.117.19:8888', '');
+  const pacsBackendUrl = import.meta.env.VITE_MAIN_PACS_API_BACKEND_URL || (isDev ? 'http://localhost:8888' : '');
+  if (isDev && pacsBackendUrl && url.startsWith(pacsBackendUrl)) {
+    const path = url.replace(pacsBackendUrl, '');
     console.debug(`[fetch-interceptor] Converting to proxy URL: ${url} -> /backend-api${path}`);
     return `/backend-api${path}`;
   }

@@ -2,7 +2,7 @@
  * Order Service
  * Handles all API calls related to order management
  * Supports both backend API and local mock data based on api-registry config
- * Backend API: http://103.42.117.19:8888/orders/
+ * Backend API: configured via VITE_MAIN_PACS_API_BACKEND_URL env var
  */
 
 import { apiClient } from './http';
@@ -20,7 +20,7 @@ const isBackendEnabled = () => {
 
 /**
  * Normalize order data from backend format to UI format
- * Backend API structure (from http://103.42.117.19:8888/orders):
+ * Backend API structure (from the configured PACS backend /orders endpoint):
  * {
  *   "id": "uuid",
  *   "order_number": "ORD2025110700005",
