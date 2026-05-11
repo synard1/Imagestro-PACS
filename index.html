@@ -282,6 +282,24 @@
     </script>
     -->
 
+  <!-- Production console suppression — runs before module loader so all module-level logs are caught -->
+  <script>
+    (function() {
+      try {
+        var host = window.location.hostname;
+        var isLocal = host === 'localhost' || host === '127.0.0.1' || host.startsWith('192.168.');
+        var debugMode = false;
+        try { debugMode = localStorage.getItem('debug_mode') === 'true'; } catch (e) {}
+        if (!isLocal && !debugMode) {
+          var noop = function() {};
+          console.log = noop;
+          console.info = noop;
+          console.debug = noop;
+          // console.warn and console.error stay native
+        }
+      } catch (e) {}
+    })();
+  </script>
   <script type="module" src="/src/main.jsx"></script>
 </body>
 

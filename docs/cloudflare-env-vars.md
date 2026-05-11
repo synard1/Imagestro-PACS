@@ -136,6 +136,31 @@ VITE_SETTINGS_AUTH_TYPE=system
 | `VITE_MAX_DICOM_SIZE` | `104857600` | Max ukuran file DICOM — default 100MB |
 | `VITE_MAX_PDF_SIZE` | `20971520` | Max ukuran PDF — default 20MB |
 | `VITE_MAX_IMAGE_SIZE` | `10485760` | Max ukuran image — default 10MB |
+
+---
+
+## Re-enable Production Console Logs (Troubleshooting)
+
+Di production, `console.log` / `console.info` / `console.debug` otomatis di-suppress untuk mengurangi noise.
+`console.warn` dan `console.error` selalu muncul dan tidak terpengaruh.
+
+**Cara re-enable untuk debugging:**
+
+1. Buka DevTools → Console
+2. Jalankan: `localStorage.setItem('debug_mode', 'true')`
+3. Reload halaman — semua log muncul kembali
+
+**Cara disable kembali:**
+
+```js
+localStorage.removeItem('debug_mode')  // lalu reload
+```
+
+Atau gunakan helper yang sudah di-expose ke `window`:
+```js
+window.enableDebugMode()   // enable + auto-reload
+window.disableDebugMode()  // disable + auto-reload
+```
 | `VITE_MAX_DOCUMENT_SIZE` | `10485760` | Max ukuran dokumen — default 10MB |
 
 ---

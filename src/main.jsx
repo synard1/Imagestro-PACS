@@ -1,5 +1,9 @@
 import React from 'react'
 import { createRoot } from 'react-dom/client'
+import { cleanupConsole } from './utils/cleanupConsole'
+
+// Suppress console.log/info/debug in production (belt-and-suspenders; index.html inline script runs first)
+cleanupConsole()
 
 // Monitoring & Error Tracking Setup
 window.addEventListener('error', (event) => {
