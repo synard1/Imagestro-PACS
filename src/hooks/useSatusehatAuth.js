@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { loadSatusehatConfig } from '../config/satusehatConfig';
 import { getDataStorageConfig } from '../services/dataSync';
+import { setEncrypted, getEncrypted } from '../utils/encryptedStorage';
 
 export function useSatusehatAuth() {
   const [isInitialized, setIsInitialized] = useState(false);
@@ -16,10 +17,10 @@ export function useSatusehatAuth() {
           return;
         }
 
-        // Check if we have a valid token
-        const tokenData = localStorage.getItem('satusehat_token');
+        // Check if we have a valid token (stored encrypted)
+        const tokenData = await getEncrypted('satusehat_token');
         if (tokenData) {
-          const { token, expiresAt } = JSON.parse(tokenData);
+          const { token, expiresAt } = tokenData;
           if (expiresAt > Date.now()) {
             setIsAuthenticated(true);
             return;
@@ -50,11 +51,11 @@ export function useSatusehatAuth() {
 
         if (response.ok) {
           const data = await response.json();
-          // Save token with expiration
-          localStorage.setItem('satusehat_token', JSON.stringify({
+          // Save token encrypted
+          await setEncrypted('satusehat_token', {
             token: data.access_token,
             expiresAt: Date.now() + (data.expires_in * 1000)
-          }));
+          });
           setIsAuthenticated(true);
         } else {
           throw new Error('Failed to authenticate with SatuSehat');

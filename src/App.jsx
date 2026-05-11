@@ -167,11 +167,14 @@ export default function App() {
     async function init() {
       try {
         // Dynamic import to avoid loading services on initial bundle
-        const [{ loadRegistry }, { getAuth }, { getCurrentUser }] = await Promise.all([
+        const [{ loadRegistry }, { getAuth, initAuthCache }, { getCurrentUser }] = await Promise.all([
           import('./services/api-registry'),
           import('./services/auth-storage'),
           import('./services/rbac')
         ]);
+
+        // Hydrate in-memory auth cache from encrypted localStorage before any getAuth() calls
+        await initAuthCache();
 
         const registry = loadRegistry()
         const authConfig = registry.auth
