@@ -8,6 +8,7 @@ import OrderActionButtons from '../../components/OrderActionButtons'
 import orderService from '../../services/orderService'
 import { useToast } from '../../components/ToastProvider'
 import Icon from '../../components/common/Icon'
+import PermissionGate from '../../components/common/PermissionGate'
 
 const OFFLINE_KEY = 'orders_offline'
 
