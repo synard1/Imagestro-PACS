@@ -32,9 +32,9 @@ export function getDataStorageConfig() {
   
   if (!parsedServerConfig) {
     parsedServerConfig = {
-      serverUrl: 'http://localhost:3001',
-      username: 'admin',
-      password: 'password123'
+      serverUrl: '',
+      username: '',
+      password: ''
     };
   }
   

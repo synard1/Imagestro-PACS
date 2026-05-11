@@ -23,12 +23,11 @@ export function getDataStorageConfig() {
     }
   }
   
-  // If no server config found, use default values
   if (!parsedServerConfig) {
     parsedServerConfig = {
       serverUrl: '/api',
-      username: 'admin',
-      password: 'password123'
+      username: '',
+      password: ''
     };
   }
   
