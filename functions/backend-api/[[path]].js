@@ -6,6 +6,8 @@ const FORWARD_HEADERS = [
   'content-type',
   'cookie',
   'x-csrf-token',
+  'x-tenant-id',
+  'x-api-key',
   'x-requested-with',
   'accept',
   'accept-language',
