@@ -14,6 +14,11 @@ export async function onRequest(context) {
   const headers = new Headers(request.headers);
   headers.delete('host'); // Let fetch set the correct host for the backend
 
+  // Log critical auth info
+  const auth = headers.get('authorization');
+  console.log(`[Proxy Auth] Authorization present: ${!!auth} (len: ${auth?.length || 0})`);
+  console.log(`[Proxy Auth] X-Tenant-ID: ${headers.get('x-tenant-id')}`);
+
   try {
     const backendResponse = await fetch(backendUrl, {
       method: request.method,
@@ -21,6 +26,8 @@ export async function onRequest(context) {
       body: request.method !== 'GET' && request.method !== 'HEAD' ? request.body : null,
       redirect: 'manual'
     });
+
+    console.log(`[Proxy Response] Backend returned: ${backendResponse.status}`);
 
     // Copy all response headers
     const responseHeaders = new Headers(backendResponse.headers);
@@ -36,6 +43,7 @@ export async function onRequest(context) {
       headers: responseHeaders
     });
   } catch (error) {
+    console.error(`[Proxy Error] ${error.message}`);
     return new Response(JSON.stringify({ error: error.message }), { status: 502 });
   }
 }
