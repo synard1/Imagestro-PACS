@@ -3,9 +3,10 @@
  * Handles PWA functionality with enable/disable capabilities
  */
 
-import { 
-  getPWAConfigWithEnvOverrides, 
-  isPWAAllowed, 
+import DOMPurify from 'dompurify'
+import {
+  getPWAConfigWithEnvOverrides,
+  isPWAAllowed,
   isEmergencyMode,
   isEmergencyDisabled,
   createEmergencyPWADisable,
@@ -281,7 +282,7 @@ class ConfigurablePWAManager {
       animation: slideIn 0.3s ease-out;
     `
 
-    notification.innerHTML = `
+    notification.innerHTML = DOMPurify.sanitize(`
       <div style="display: flex; align-items: center; gap: 12px;">
         <div style="
           width: 40px;
@@ -323,7 +324,7 @@ class ConfigurablePWAManager {
           ">Later</button>
         </div>
       </div>
-    `
+    `)
 
     document.body.appendChild(notification)
 

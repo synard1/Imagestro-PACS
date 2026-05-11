@@ -1,3 +1,5 @@
+import DOMPurify from 'dompurify'
+
 /**
  * Simple Connection Monitor
  * Detects when development server goes offline and shows immediate notification
@@ -114,7 +116,7 @@ class ConnectionMonitor {
     // Create notification overlay
     this.notificationElement = document.createElement('div');
     this.notificationElement.id = 'connection-lost-notification';
-    this.notificationElement.innerHTML = `
+    this.notificationElement.innerHTML = DOMPurify.sanitize(`
       <div style="
         position: fixed;
         top: 0;
@@ -181,7 +183,7 @@ class ConnectionMonitor {
           </div>
           
           <div style="display: flex; gap: 12px;">
-            <button onclick="connectionMonitor.checkConnection()" style="
+            <button id="connection-check-btn" style="
               flex: 1;
               background: #3b82f6;
               color: white;
@@ -194,7 +196,7 @@ class ConnectionMonitor {
             ">
               Check Again
             </button>
-            <button onclick="connectionMonitor.hideNotification()" style="
+            <button id="connection-dismiss-btn" style="
               background: #f3f4f6;
               color: #6b7280;
               border: none;
@@ -217,7 +219,11 @@ class ConnectionMonitor {
           </div>
         </div>
       </div>
-    `;
+    `);
+    this.notificationElement.querySelector('#connection-check-btn')
+      .addEventListener('click', () => this.checkConnection());
+    this.notificationElement.querySelector('#connection-dismiss-btn')
+      .addEventListener('click', () => this.hideNotification());
 
     document.body.appendChild(this.notificationElement);
   }

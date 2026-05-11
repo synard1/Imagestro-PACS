@@ -1,3 +1,5 @@
+import DOMPurify from 'dompurify'
+
 /**
  * PWA Update Manager
  * Enhanced utilities for handling PWA updates with better debugging
@@ -192,7 +194,7 @@ class PWAUpdateManager {
       animation: slideIn 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
     `;
 
-    notification.innerHTML = `
+    notification.innerHTML = DOMPurify.sanitize(`
       <div style="display: flex; align-items: center; gap: 12px;">
         <div style="
           width: 40px;
@@ -242,7 +244,7 @@ class PWAUpdateManager {
           Later
         </button>
       </div>
-    `;
+    `);
 
     // Add animation styles
     if (!document.querySelector('#pwa-update-animations')) {

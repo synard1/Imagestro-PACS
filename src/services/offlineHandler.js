@@ -766,7 +766,9 @@ class OfflineHandler {
       function updateRetryInfo() {
           const retryInfo = document.querySelector('.retry-info');
           if (retryInfo && currentRetryCount > 0) {
-              retryInfo.innerHTML = \`<p>Retry attempts: \${currentRetryCount}/\${maxRetryCount}</p>\`;
+              let p = retryInfo.querySelector('p');
+              if (!p) { p = document.createElement('p'); retryInfo.appendChild(p); }
+              p.textContent = `Retry attempts: ${currentRetryCount}/${maxRetryCount}`;
           }
       }
       
