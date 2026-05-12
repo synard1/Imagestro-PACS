@@ -17,6 +17,9 @@ type Bindings = {
   SATUSEHAT_INTEGRATOR_URL: string;
   ALLOWED_ORIGINS: string;
   TURNSTILE_SECRET_KEY: string;
+  BACKBONE: {
+    fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+  };
 }
 
 const app = new Hono<{ Bindings: Bindings }>();
@@ -127,7 +130,9 @@ async function proxyRequest(c: any, baseUrl: string, targetPath: string, extraHe
   };
 
   try {
-    const response = await fetch(url.toString(), reqInit);
+    const response = c.env.BACKBONE
+      ? await c.env.BACKBONE.fetch(url.toString(), reqInit)
+      : await fetch(url.toString(), reqInit);
     return new Response(response.body, {
       status: response.status,
       headers: response.headers,

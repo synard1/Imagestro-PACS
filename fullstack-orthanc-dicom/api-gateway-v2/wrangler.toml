@@ -1,24 +1,29 @@
 ﻿name = "api-gateway-v2"
 main = "src/index.ts"
-compatibility_date = "2024-09-23"
+compatibility_date = "2026-05-12"
 compatibility_flags = [ "nodejs_compat" ]
 
 [vars]
 ALLOWED_ORIGINS = "http://localhost:5173,http://localhost:3000,https://imagestro-pacs.pages.dev,https://mwl.satupintudigital.co.id"
 JWT_ALGORITHM = "HS256"
-# Backend services via Cloudflare Tunnel (aizen) → satupintudigital.co.id
-AUTH_SERVICE_URL = "https://auth-pacs.satupintudigital.co.id"
-PACS_SERVICE_URL = "https://dicom-pacs.satupintudigital.co.id"
-MASTER_DATA_SERVICE_URL = "https://master-pacs.satupintudigital.co.id"
-ORDER_SERVICE_URL = "https://order-pacs.satupintudigital.co.id"
-MWL_SERVICE_URL = "https://mwl-writer-pacs.satupintudigital.co.id"
-SIMRS_UNIVERSAL_URL = "https://universal-pacs.satupintudigital.co.id"
-SATUSEHAT_INTEGRATOR_URL = "https://satusehat-pacs.satupintudigital.co.id"
-KHANZA_API_URL = "https://khanza-pacs.satupintudigital.co.id"
+# Backend services via Workers VPC Network (tunnel aizen)
+AUTH_SERVICE_URL = "http://auth-service:5000"
+PACS_SERVICE_URL = "http://pacs-service:8003"
+MASTER_DATA_SERVICE_URL = "http://master-data-service:8002"
+ORDER_SERVICE_URL = "http://order-management:8001"
+MWL_SERVICE_URL = "http://mwl-writer-secured:8000"
+SIMRS_UNIVERSAL_URL = "http://simrs-universal-api:8005"
+SATUSEHAT_INTEGRATOR_URL = "http://satusehat-integrator:8081"
+KHANZA_API_URL = "http://khanza-api:3000"
 
 [[kv_namespaces]]
 binding = "API_CACHE"
 id = "19df22b7c1764cb7b091e2ed929df9b4"
+
+[[vpc_networks]]
+binding = "BACKBONE"
+tunnel_id = "5c496701-6046-410a-a870-f20f096c65e4"
+remote = true
 
 [observability]
 enabled = true
