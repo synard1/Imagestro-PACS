@@ -160,6 +160,7 @@ export default function CompletedOrdersView() {
                             ))}
                         </tbody>
                     </table>
+                    </div>
                 )}
             </div>
         </div>
