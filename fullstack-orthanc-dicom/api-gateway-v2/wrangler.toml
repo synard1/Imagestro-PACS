@@ -1,26 +1,31 @@
-name = "api-gateway-v2"
-main = "./src/index.ts"
+﻿name = "api-gateway-v2"
+main = "src/index.ts"
 compatibility_date = "2024-09-23"
 compatibility_flags = [ "nodejs_compat" ]
 
 [vars]
-DATABASE_URL = "postgresql://user:password@localhost:5432/dbname"
-AUTH_SERVICE_URL = "http://auth-service:5000"
-MASTER_DATA_SERVICE_URL = "http://master-data-service:8002"
-ORDER_MANAGEMENT_SERVICE_URL = "http://order-management-service:8001"
-MWL_WRITER_SERVICE_URL = "http://mwl-writer-service:8000"
+ALLOWED_ORIGINS = "http://localhost:5173,http://localhost:3000,https://imagestro-pacs.pages.dev,https://mwl.satupintudigital.co.id"
+JWT_ALGORITHM = "HS256"
+# Backend services via Cloudflare Tunnel (aizen) → satupintudigital.co.id
+AUTH_SERVICE_URL = "https://auth-pacs.satupintudigital.co.id"
+PACS_SERVICE_URL = "https://dicom-pacs.satupintudigital.co.id"
+MASTER_DATA_SERVICE_URL = "https://master-pacs.satupintudigital.co.id"
+ORDER_SERVICE_URL = "https://order-pacs.satupintudigital.co.id"
+MWL_SERVICE_URL = "https://mwl-writer-pacs.satupintudigital.co.id"
+SIMRS_UNIVERSAL_URL = "https://universal-pacs.satupintudigital.co.id"
+SATUSEHAT_INTEGRATOR_URL = "https://satusehat-pacs.satupintudigital.co.id"
+KHANZA_API_URL = "https://khanza-pacs.satupintudigital.co.id"
 
 [[kv_namespaces]]
 binding = "API_CACHE"
-id = "your_kv_namespace_id"
+id = "19df22b7c1764cb7b091e2ed929df9b4"
 
-[[services.dns]]
-binding = "OUTBOUND_DNS"
-service = "fathom"
+[observability]
+enabled = true
+head_sampling_rate = 1
 
-[upload.formats]
-uploaded = [{ glob = "dist/**" }]
-
-[[site]]
-bucket = "./public"
-entry-point = "workers-site"
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+persist = true
+invocation_logs = true
