@@ -3,7 +3,6 @@ import { setAuth, clearAuth, getAuth, isExpired } from "./auth-storage";
 import { setCurrentUser, clearCurrentUser, getCurrentUser } from "./rbac";
 import { loadRegistry } from "./api-registry";
 import { logger } from "../utils/logger";
-import { logger as cleanLogger } from "../utils/cleanupConsole";
 
 /**
  * Login menggunakan backend auth module
@@ -229,15 +228,15 @@ export async function logoutBackend() {
           await client.post(logoutPath);
         } catch (error) {
           // Quietly ignore backend logout failures; proceed with local cleanup
-          cleanLogger.debug("[AUTH] Skipping backend logout (request failed):", error.message || error);
+          logger.debug("[AUTH] Skipping backend logout (request failed):", error.message || error);
         }
       } else {
-        cleanLogger.debug("[AUTH] Auth backend not reachable, skipping logout request");
+        logger.debug("[AUTH] Auth backend not reachable, skipping logout request");
       }
     }
   } catch (error) {
     // Don’t propagate; logout should always proceed
-    cleanLogger.debug("[AUTH] Logout encountered a non-fatal error:", error.message || error);
+    logger.debug("[AUTH] Logout encountered a non-fatal error:", error.message || error);
   } finally {
     // Always clear local auth data
     clearAuth();
@@ -248,9 +247,9 @@ export async function logoutBackend() {
       const sessionManagerModule = await import('./sessionManager');
       const sessionManager = sessionManagerModule.default;
       sessionManager.destroy();
-      cleanLogger.debug("[AUTH] Session manager destroyed");
+      logger.debug("[AUTH] Session manager destroyed");
     } catch (error) {
-      cleanLogger.warn("[AUTH] Failed to destroy session manager:", error.message);
+      logger.warn("[AUTH] Failed to destroy session manager:", error.message);
     }
   }
 }
@@ -336,7 +335,7 @@ export async function verifyToken() {
     // Check if token exists
     const currentAuth = getAuth();
     if (!currentAuth || !currentAuth.access_token) {
-      cleanLogger.debug("[AUTH] No token found for verification");
+      logger.debug("[AUTH] No token found for verification");
       throw new Error("No authentication token found");
     }
 
@@ -353,12 +352,12 @@ export async function verifyToken() {
 
     // Jika token expired, coba refresh dulu
     if (isExpired(currentAuth)) {
-      cleanLogger.debug("[AUTH] Token expired, attempting refresh...");
+      logger.debug("[AUTH] Token expired, attempting refresh...");
       try {
         await refreshToken();
-        cleanLogger.debug("[AUTH] Token refreshed, continuing verification");
+        logger.debug("[AUTH] Token refreshed, continuing verification");
       } catch (refreshError) {
-        cleanLogger.error("[AUTH] Token refresh failed:", refreshError.message);
+        logger.error("[AUTH] Token refresh failed:", refreshError.message);
         clearAuth();
         clearCurrentUser();
         throw refreshError;
@@ -448,7 +447,7 @@ export async function initializeAuth() {
 
     // If auth is not enabled, return null
     if (!authConfig || !authConfig.enabled) {
-      cleanLogger.debug("[AUTH] Backend auth not enabled");
+      logger.debug("[AUTH] Backend auth not enabled");
       clearAuth();
       clearCurrentUser();
       return null;
@@ -615,12 +614,12 @@ export async function updateTourStatus(version = '1.0') {
       };
       
       localStorage.setItem('currentUser', JSON.stringify(updatedUser));
-      cleanLogger.debug("[AUTH]", "Tour status updated (Local)");
+      logger.debug("[AUTH]", "Tour status updated (Local)");
       return { status: 'success', user: updatedUser };
     }
 
     const client = apiClient("auth");
-    cleanLogger.debug("[AUTH]", `Updating tour status for user: ${user.username}`);
+    logger.debug("[AUTH]", `Updating tour status for user: ${user.username}`);
 
     const response = await client.patch("/auth/tour/complete", { version });
     
@@ -632,13 +631,13 @@ export async function updateTourStatus(version = '1.0') {
         tour_completed: true 
       };
       localStorage.setItem('currentUser', JSON.stringify(updatedUser));
-      cleanLogger.debug("[AUTH]", "Tour status updated (Backend)");
+      logger.debug("[AUTH]", "Tour status updated (Backend)");
       return { status: 'success', user: updatedUser };
     }
 
     return response;
   } catch (error) {
-    cleanLogger.error("[AUTH]", "Update tour status failed:", error.message);
+    logger.error("[AUTH]", "Update tour status failed:", error.message);
     throw error;
   }
 }
@@ -669,7 +668,7 @@ export async function updateQuickStartProgress(taskId, version = '1.0') {
       };
       
       localStorage.setItem('onboarding_progress', JSON.stringify(progress));
-      cleanLogger.debug("[AUTH]", `Quick start progress updated locally for ${taskId}`);
+      logger.debug("[AUTH]", `Quick start progress updated locally for ${taskId}`);
       return { status: 'success', progress };
     }
 
@@ -681,13 +680,13 @@ export async function updateQuickStartProgress(taskId, version = '1.0') {
     });
     
     if (response.status === 'success') {
-      cleanLogger.debug("[AUTH]", `Quick start progress updated on backend for ${taskId}`);
+      logger.debug("[AUTH]", `Quick start progress updated on backend for ${taskId}`);
       return { status: 'success', progress: response.data };
     }
 
     return response;
   } catch (error) {
-    cleanLogger.error("[AUTH]", `Update quick start progress failed for ${taskId}:`, error.message);
+    logger.error("[AUTH]", `Update quick start progress failed for ${taskId}:`, error.message);
     throw error;
   }
 }
