@@ -265,6 +265,28 @@ export const DEFAULT_THEME_ID = 'professional';
 export const THEME_STORAGE_KEY = 'app_theme_preference';
 
 /**
+ * Get the default theme ID from environment variable or fallback to hardcoded default
+ * Environment variable: VITE_DEFAULT_THEME
+ * @returns {string} Theme ID to use as default
+ */
+export const getEnvDefaultTheme = () => {
+  const envTheme = import.meta.env.VITE_DEFAULT_THEME;
+  if (envTheme && isValidThemeId(envTheme)) {
+    return envTheme;
+  }
+  return DEFAULT_THEME_ID;
+};
+
+/**
+ * Get the initial theme ID considering environment and defaults
+ * Priority: environment variable > hardcoded default
+ * @returns {string} Theme ID to use as initial/default
+ */
+export const getInitialThemeId = () => {
+  return getEnvDefaultTheme();
+};
+
+/**
  * Get all available themes as an array
  * @returns {Array} Array of theme configurations
  */

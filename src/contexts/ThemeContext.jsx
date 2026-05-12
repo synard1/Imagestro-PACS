@@ -15,7 +15,8 @@ import {
   getThemeById,
   getThemesList,
   isValidThemeId,
-  themeToCssVariables
+  themeToCssVariables,
+  getInitialThemeId
 } from '../config/themes';
 
 /**
@@ -41,7 +42,8 @@ const applyCssVariables = (theme) => {
 
 /**
  * Load theme preference from localStorage
- * @returns {string} Theme ID from storage or default
+ * Priority: localStorage > environment variable > hardcoded default
+ * @returns {string} Theme ID from storage, env var, or default
  */
 const loadThemeFromStorage = () => {
   try {
@@ -55,7 +57,8 @@ const loadThemeFromStorage = () => {
   } catch (error) {
     console.warn('Failed to load theme preference from storage:', error);
   }
-  return DEFAULT_THEME_ID;
+  // Fall back to environment-based default or hardcoded default
+  return getInitialThemeId();
 };
 
 /**
