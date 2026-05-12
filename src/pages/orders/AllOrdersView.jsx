@@ -351,6 +351,7 @@ export default function AllOrdersView({ syncingOrders: externalSyncingOrders }) 
                             ))}
                         </tbody>
                     </table>
+                    </div>
                 )}
             </div>
         </div>
