@@ -31,11 +31,6 @@ const DevCacheManager = () => {
   // Get initial configuration
   const initialState = getCacheManagerInitialState();
 
-  // Don't render if not visible
-  if (!isVisible) {
-    return null;
-  }
-
   // Initialize state from configuration
   useEffect(() => {
     setIsVisible(initialState.visible);
@@ -126,6 +121,11 @@ const DevCacheManager = () => {
   const positionStyles = getCacheManagerPositionStyles();
   const sizeStyles = getCacheManagerSize(isMinimized);
   const cssClasses = getCacheManagerClasses(isMinimized);
+
+  // Don't render if not visible
+  if (!isVisible) {
+    return null;
+  }
 
   if (!cacheStatus) {
     return (
