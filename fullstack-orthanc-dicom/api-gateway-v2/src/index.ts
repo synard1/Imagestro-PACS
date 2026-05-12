@@ -17,6 +17,15 @@ type Bindings = {
   SATUSEHAT_INTEGRATOR_URL: string;
   ALLOWED_ORIGINS: string;
   TURNSTILE_SECRET_KEY: string;
+  AUTH_RATE_LIMIT_ENABLED?: string;
+  AUTH_RATE_LIMIT_WINDOW_SECONDS?: string;
+  AUTH_RATE_LIMIT_MAX_ATTEMPTS_IP?: string;
+  AUTH_RATE_LIMIT_MAX_ATTEMPTS_USER?: string;
+  AUTH_RATE_LIMIT_BLOCK_SECONDS?: string;
+  API_CACHE: {
+    get: (key: string) => Promise<string | null>;
+    put: (key: string, value: string, options?: { expirationTtl?: number }) => Promise<void>;
+  };
   BACKBONE: {
     fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   };
@@ -75,7 +84,7 @@ async function getAuthContext(c: any) {
 
 async function verifyTurnstile(token: string, secret: string, ip: string) {
   if (!token || !secret) return false;
-  
+
   const formData = new FormData();
   formData.append('secret', secret);
   formData.append('response', token);
@@ -92,6 +101,156 @@ async function verifyTurnstile(token: string, secret: string, ip: string) {
     console.error('[Turnstile Error]', e);
     return false;
   }
+}
+
+type LoginRateLimitState = {
+  count: number;
+  windowStart: number;
+  blockedUntil: number;
+};
+
+function toPositiveInt(value: string | undefined, fallback: number) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.floor(parsed);
+}
+
+function getRateLimitConfig(c: any) {
+  const enabledRaw = String(c.env.AUTH_RATE_LIMIT_ENABLED ?? 'true').toLowerCase();
+  return {
+    enabled: !['false', '0', 'off', 'no'].includes(enabledRaw),
+    windowSeconds: toPositiveInt(c.env.AUTH_RATE_LIMIT_WINDOW_SECONDS, 60),
+    maxAttemptsIp: toPositiveInt(c.env.AUTH_RATE_LIMIT_MAX_ATTEMPTS_IP, 10),
+    maxAttemptsUser: toPositiveInt(c.env.AUTH_RATE_LIMIT_MAX_ATTEMPTS_USER, 5),
+    blockSeconds: toPositiveInt(c.env.AUTH_RATE_LIMIT_BLOCK_SECONDS, 300),
+  };
+}
+
+async function checkRateLimit(c: any, key: string, maxAttempts: number, windowSeconds: number, blockSeconds: number) {
+  const now = Math.floor(Date.now() / 1000);
+  const raw = await c.env.API_CACHE.get(key);
+
+  let state: LoginRateLimitState = raw
+    ? JSON.parse(raw)
+    : { count: 0, windowStart: now, blockedUntil: 0 };
+
+  if (state.blockedUntil > now) {
+    return {
+      allowed: false,
+      retryAfter: state.blockedUntil - now,
+      remaining: 0,
+      resetAfter: state.blockedUntil - now,
+    };
+  }
+
+  if (now - state.windowStart >= windowSeconds) {
+    state = { count: 0, windowStart: now, blockedUntil: 0 };
+  }
+
+  state.count += 1;
+
+  if (state.count > maxAttempts) {
+    state.blockedUntil = now + blockSeconds;
+    await c.env.API_CACHE.put(key, JSON.stringify(state), {
+      expirationTtl: windowSeconds + blockSeconds,
+    });
+    return {
+      allowed: false,
+      retryAfter: blockSeconds,
+      remaining: 0,
+      resetAfter: blockSeconds,
+    };
+  }
+
+  await c.env.API_CACHE.put(key, JSON.stringify(state), {
+    expirationTtl: windowSeconds + blockSeconds,
+  });
+
+  return {
+    allowed: true,
+    retryAfter: 0,
+    remaining: Math.max(0, maxAttempts - state.count),
+    resetAfter: Math.max(0, windowSeconds - (now - state.windowStart)),
+  };
+}
+
+function getLoginUsernameFromRequest(req: any) {
+  return (async () => {
+    const contentType = (req.header('Content-Type') || '').toLowerCase();
+
+    try {
+      if (contentType.includes('application/json')) {
+        const payload = await req.raw.clone().json();
+        const username = payload?.username;
+        return typeof username === 'string' ? username.trim().toLowerCase() : '';
+      }
+
+      if (contentType.includes('application/x-www-form-urlencoded')) {
+        const form = await req.raw.clone().formData();
+        const username = form.get('username');
+        return typeof username === 'string' ? username.trim().toLowerCase() : '';
+      }
+    } catch (_e) {
+      return '';
+    }
+
+    return '';
+  })();
+}
+
+async function applyLoginRateLimit(c: any) {
+  const config = getRateLimitConfig(c);
+  if (!config.enabled) return null;
+
+  const clientIp = (c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || 'unknown').split(',')[0].trim();
+  const ipResult = await checkRateLimit(
+    c,
+    `rl:login:ip:${clientIp}`,
+    config.maxAttemptsIp,
+    config.windowSeconds,
+    config.blockSeconds
+  );
+
+  if (!ipResult.allowed) {
+    const response = c.json(
+      { success: false, error: { code: 'RATE_LIMITED', message: 'Too many login attempts from this IP. Please try again later.' } },
+      429
+    );
+    response.headers.set('Retry-After', String(ipResult.retryAfter));
+    response.headers.set('X-RateLimit-Limit', String(config.maxAttemptsIp));
+    response.headers.set('X-RateLimit-Remaining', '0');
+    response.headers.set('X-RateLimit-Reset', String(ipResult.resetAfter));
+    return response;
+  }
+
+  const username = await getLoginUsernameFromRequest(c.req);
+  if (username) {
+    const userResult = await checkRateLimit(
+      c,
+      `rl:login:user:${username}`,
+      config.maxAttemptsUser,
+      config.windowSeconds,
+      config.blockSeconds
+    );
+
+    if (!userResult.allowed) {
+      const response = c.json(
+        { success: false, error: { code: 'RATE_LIMITED', message: 'Too many login attempts for this account. Please try again later.' } },
+        429
+      );
+      response.headers.set('Retry-After', String(userResult.retryAfter));
+      response.headers.set('X-RateLimit-Limit', String(config.maxAttemptsUser));
+      response.headers.set('X-RateLimit-Remaining', '0');
+      response.headers.set('X-RateLimit-Reset', String(userResult.resetAfter));
+      return response;
+    }
+  }
+
+  c.header('X-RateLimit-Limit', String(config.maxAttemptsIp));
+  c.header('X-RateLimit-Remaining', String(ipResult.remaining));
+  c.header('X-RateLimit-Reset', String(ipResult.resetAfter));
+
+  return null;
 }
 
 // 3. Proxy Helper
@@ -149,17 +308,20 @@ async function proxyRequest(c: any, baseUrl: string, targetPath: string, extraHe
 app.get('/', (c) => c.json({ status: 'ok', service: 'api-gateway', version: '2.45.0-hono' }));
 app.get('/health', (c) => proxyRequest(c, c.env.PACS_SERVICE_URL, 'api/health'));
 
-// Turnstile Protected Login
+// Turnstile + Rate Limited Login
 app.post('/auth/login', async (c) => {
   const turnstileToken = c.req.header('X-Turnstile-Token');
   const ip = c.req.header('CF-Connecting-IP') || '';
-  
+
   if (c.env.TURNSTILE_SECRET_KEY) {
     const isValid = await verifyTurnstile(turnstileToken || '', c.env.TURNSTILE_SECRET_KEY, ip);
     if (!isValid) {
       return c.json({ success: false, error: { code: 'SECURITY_CHECK_FAILED', message: 'Bot detection failed' } }, 403);
     }
   }
+
+  const rateLimited = await applyLoginRateLimit(c);
+  if (rateLimited) return rateLimited;
 
   return proxyRequest(c, c.env.AUTH_SERVICE_URL, 'auth/login');
 });

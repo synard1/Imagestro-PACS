@@ -16,6 +16,13 @@ SIMRS_UNIVERSAL_URL = "http://simrs-universal-api:8005"
 SATUSEHAT_INTEGRATOR_URL = "http://satusehat-integrator:8081"
 KHANZA_API_URL = "http://khanza-api:3000"
 
+# Rate limiting for /auth/login
+AUTH_RATE_LIMIT_ENABLED = "true"
+AUTH_RATE_LIMIT_WINDOW_SECONDS = "60"
+AUTH_RATE_LIMIT_MAX_ATTEMPTS_IP = "10"
+AUTH_RATE_LIMIT_MAX_ATTEMPTS_USER = "5"
+AUTH_RATE_LIMIT_BLOCK_SECONDS = "300"
+
 [[kv_namespaces]]
 binding = "API_CACHE"
 id = "19df22b7c1764cb7b091e2ed929df9b4"
