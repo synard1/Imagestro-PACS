@@ -15,6 +15,11 @@ import {
  * Visibility and behavior controlled by environment variables
  */
 const DevCacheManager = () => {
+  // Check if cache manager should be shown
+  if (!shouldShowCacheManager()) {
+    return null;
+  }
+
   const [cacheStatus, setCacheStatus] = useState(null);
   const [isClearing, setIsClearing] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
@@ -26,8 +31,8 @@ const DevCacheManager = () => {
   // Get initial configuration
   const initialState = getCacheManagerInitialState();
 
-  // Check if cache manager should be shown
-  if (!shouldShowCacheManager()) {
+  // Don't render if not visible
+  if (!isVisible) {
     return null;
   }
 
@@ -35,7 +40,7 @@ const DevCacheManager = () => {
   useEffect(() => {
     setIsVisible(initialState.visible);
     setIsMinimized(initialState.minimized);
-    
+
     // Log configuration in development
     if (import.meta.env.DEV) {
       logCacheManagerConfig();
@@ -47,7 +52,7 @@ const DevCacheManager = () => {
     if (initialState.autoHide && isVisible && !isMinimized) {
       startAutoHideTimer();
     }
-    
+
     return () => clearAutoHideTimer();
   }, [isVisible, isMinimized]);
 
@@ -74,11 +79,6 @@ const DevCacheManager = () => {
       startAutoHideTimer();
     }
   };
-
-  // Don't render if not visible
-  if (!isVisible) {
-    return null;
-  }
 
   useEffect(() => {
     loadCacheStatus();
