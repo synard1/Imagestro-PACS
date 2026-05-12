@@ -329,7 +329,6 @@ export default function IntakeQueueView() {
                             Tip: Select multiple orders to use batch operations
                         </div>
                     )}
-                    <div>
                     <div className="overflow-x-auto">
                         <table className="table w-full">
                             <thead className="bg-slate-50 border-b-2 border-slate-200 sticky top-0 z-10">
