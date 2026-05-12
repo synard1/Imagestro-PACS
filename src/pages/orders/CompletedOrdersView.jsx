@@ -110,49 +110,52 @@ export default function CompletedOrdersView() {
                         No completed orders found
                     </div>
                 ) : (
-                    <table className="table text-sm">
-                        <thead>
-                            <tr>
-                                <th className="text-xs">#</th>
-                                <th className="text-xs">Order Number</th>
-                                <th className="text-xs">Patient Name</th>
-                                <th className="text-xs">Procedure</th>
-                                <th className="text-xs">Completed At</th>
-                                <th className="text-xs">Status</th>
-                                <th className="text-xs">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {filtered.map((r, index) => (
-                                <tr key={r.id} className="text-xs">
-                                    <td>{index + 1}</td>
-                                    <td>{r.order_number || '—'}</td>
-                                    <td>
-                                        <div className="font-medium">{r.patient_name}</div>
-                                        <div className="text-xs text-slate-500">{r.medical_record_number || r.patient_id}</div>
-                                    </td>
-                                    <td>
-                                        <div className="flex items-center gap-2">
-                                            <span>{r.requested_procedure || r.procedure_name || '—'}</span>
-                                            {r.procedure_count > 1 && (
-                                                <span className="badge badge-gray">
-                                                    +{r.procedure_count - 1} more
-                                                </span>
-                                            )}
-                                        </div>
-                                    </td>
-                                    <td className="text-sm">
-                                        {r.completed_at ? new Date(r.completed_at).toLocaleString() : '—'}
-                                    </td>
-                                    <td><StatusBadge status={r.status} showIcon={true} /></td>
-                                    <td className="text-center">
-                                        <Link
-                                            to={`/orders/${r.id}`}
-                                            className="text-themed-primary hover:underline text-xs"
-                                        >
-                                            View Details
-                                        </Link>
-                                    </td>
+                    <div className="overflow-x-auto">
+                        <table className="table w-full">
+                            <thead className="bg-slate-50 border-b-2 border-slate-200 sticky top-0 z-10">
+                                <tr>
+                                    <th className="text-sm font-semibold text-slate-700 px-4 py-3 text-center w-16">#</th>
+                                    <th className="text-sm font-semibold text-slate-700 px-4 py-3 text-left">Order Number</th>
+                                    <th className="text-sm font-semibold text-slate-700 px-4 py-3 text-left">Patient Name</th>
+                                    <th className="text-sm font-semibold text-slate-700 px-4 py-3 text-left">Procedure</th>
+                                    <th className="text-sm font-semibold text-slate-700 px-4 py-3 text-left">Completed At</th>
+                                    <th className="text-sm font-semibold text-slate-700 px-4 py-3 text-center">Status</th>
+                                    <th className="text-sm font-semibold text-slate-700 px-4 py-3 text-center">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {filtered.map((r, index) => (
+                                    <tr key={r.id} className="text-sm border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                                        <td className="px-4 py-3 text-center text-slate-500">{index + 1}</td>
+                                        <td className="px-4 py-3 font-medium">{r.order_number || '—'}</td>
+                                        <td className="px-4 py-3">
+                                            <div className="font-medium text-slate-900">{r.patient_name}</div>
+                                            <div className="text-[11px] text-slate-500 mt-0.5">{r.medical_record_number || r.patient_id}</div>
+                                        </td>
+                                        <td className="px-4 py-3">
+                                            <div className="flex items-center gap-2 max-w-md">
+                                                <span className="truncate">{r.requested_procedure || r.procedure_name || '—'}</span>
+                                                {r.procedure_count > 1 && (
+                                                    <span className="badge badge-gray flex-shrink-0">
+                                                        +{r.procedure_count - 1} more
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </td>
+                                        <td className="px-4 py-3 whitespace-nowrap text-slate-600">
+                                            {r.completed_at ? new Date(r.completed_at).toLocaleString() : '—'}
+                                        </td>
+                                        <td className="px-4 py-3 text-center">
+                                            <StatusBadge status={r.status} showIcon={true} />
+                                        </td>
+                                        <td className="px-4 py-3 text-center">
+                                            <Link
+                                                to={`/orders/${r.id}`}
+                                                className="text-themed-primary hover:underline text-sm"
+                                            >
+                                                View Details
+                                            </Link>
+                                        </td>
                                 </tr>
                             ))}
                         </tbody>

@@ -292,35 +292,36 @@ export default function AllOrdersView({ syncingOrders: externalSyncingOrders }) 
                         <p className="mt-4 text-gray-600">Loading orders...</p>
                     </div>
                 ) : (
-                    <table className="table text-sm">
-                        <thead>
-                            <tr>
-                                <th className="text-xs">#</th>
-                                <th className="text-xs">Order Number</th>
-                                <th className="text-xs">Patient Name</th>
-                                <th className="text-xs">Requested Procedure</th>
-                                <th className="text-xs">Scheduled</th>
-                                <th className="text-xs">Status</th>
-                                <th className="text-xs">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {filtered.map((r, index) => (
-                                <tr key={r.id} className={`text-xs ${r._offline ? 'bg-amber-50' : ''}`}>
-                                    <td>{index + 1}</td>
-                                    <td>{r.order_number || '—'}</td>
-                                    <td>
-                                        <div className="font-medium">{r.patient_name}</div>
-                                        <div className="text-xs text-slate-500">
-                                            {r.patient_id ? `${r.patient_id.substring(0, 3)}****${r.patient_id.substring(r.patient_id.length - 3)}` : ''}
-                                        </div>
-                                    </td>
-                                    <td>
-                                        <div className="flex items-center gap-2">
-                                            <span>{r.requested_procedure || r.procedure_name || r.procedureName || r.procedure_description || r.service_request || '—'}</span>
+                    <div className="overflow-x-auto">
+                        <table className="table text-sm w-full">
+                            <thead className="bg-slate-50 border-b-2 border-slate-200 sticky top-0 z-10">
+                                <tr>
+                                    <th className="text-sm font-semibold text-slate-700 px-4 py-3 text-center w-16">#</th>
+                                    <th className="text-sm font-semibold text-slate-700 px-4 py-3 text-left">Order Number</th>
+                                    <th className="text-sm font-semibold text-slate-700 px-4 py-3 text-left">Patient Name</th>
+                                    <th className="text-sm font-semibold text-slate-700 px-4 py-3 text-left">Requested Procedure</th>
+                                    <th className="text-sm font-semibold text-slate-700 px-4 py-3 text-left">Scheduled</th>
+                                    <th className="text-sm font-semibold text-slate-700 px-4 py-3 text-center">Status</th>
+                                    <th className="text-sm font-semibold text-slate-700 px-4 py-3 text-center">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {filtered.map((r, index) => (
+                                    <tr key={r.id} className={`text-sm border-b border-slate-100 hover:bg-slate-50 transition-colors ${r._offline ? 'bg-amber-50 border-l-4 border-amber-400' : ''}`}>
+                                        <td className="px-4 py-3 text-center text-slate-500">{index + 1}</td>
+                                        <td className="px-4 py-3 font-medium">{r.order_number || '—'}</td>
+                                        <td className="px-4 py-3">
+                                            <div className="font-medium text-slate-900">{r.patient_name}</div>
+                                            <div className="text-[11px] text-slate-500 mt-0.5">
+                                                {r.patient_id ? `${r.patient_id.substring(0, 3)}****${r.patient_id.substring(r.patient_id.length - 3)}` : ''}
+                                            </div>
+                                        </td>
+                                    <td className="px-4 py-3">
+                                        <div className="flex items-center gap-2 max-w-md">
+                                            <span className="truncate">{r.requested_procedure || r.procedure_name || r.procedureName || r.procedure_description || r.service_request || '—'}</span>
                                             {r.procedure_count > 1 && (
                                                 <span
-                                                    className="badge badge-gray"
+                                                    className="badge badge-gray flex-shrink-0"
                                                     title={`This order contains ${r.procedure_count} procedures`}
                                                 >
                                                     +{r.procedure_count - 1} more
@@ -328,11 +329,13 @@ export default function AllOrdersView({ syncingOrders: externalSyncingOrders }) 
                                             )}
                                         </div>
                                     </td>
-                                    <td className="text-sm">
+                                    <td className="px-4 py-3 whitespace-nowrap text-slate-600">
                                         {r.scheduled_at ? new Date(r.scheduled_at).toLocaleString() : '—'}
                                     </td>
-                                    <td><StatusBadge status={r.status} showIcon={true} /></td>
-                                    <td className="text-center">
+                                    <td className="px-4 py-3 text-center">
+                                        <StatusBadge status={r.status} showIcon={true} />
+                                    </td>
+                                    <td className="px-4 py-3 text-center">
                                         <div className="inline-flex justify-center">
                                             <OrderActionButtons
                                                 order={r}

@@ -330,30 +330,31 @@ export default function IntakeQueueView() {
                         </div>
                     )}
                     <div>
-                    <table className="table text-sm">
-                        <thead>
-                            <tr className="text-left border-b">
-                                <th className="py-2 pr-4">
-                                    <input
-                                        type="checkbox"
-                                        checked={selectedOrders.length === orders.length && orders.length > 0}
-                                        onChange={handleSelectAll}
-                                        className="rounded border-gray-300"
-                                    />
-                                </th>
-                                <th className="py-2 pr-4 text-xs font-medium text-slate-500 uppercase">Order #</th>
-                                <th className="py-2 pr-4 text-xs font-medium text-slate-500 uppercase">Patient</th>
-                                <th className="py-2 pr-4 text-xs font-medium text-slate-500 uppercase">Procedure</th>
-                                <th className="py-2 pr-4 text-xs font-medium text-slate-500 uppercase">Scheduled</th>
-                                <th className="py-2 pr-4 text-xs font-medium text-slate-500 uppercase">Priority</th>
-                                <th className="py-2 pr-4 text-xs font-medium text-slate-500 uppercase">Status</th>
-                                <th className="py-2 pr-4 text-xs font-medium text-slate-500 uppercase">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {orders.map((order) => (
-                                <tr key={order.id} className={`border-b last:border-0 ${order._offline ? 'bg-amber-50' : ''} hover:bg-slate-50`}>
-                                    <td className="py-2 pr-4">
+                    <div className="overflow-x-auto">
+                        <table className="table w-full">
+                            <thead className="bg-slate-50 border-b-2 border-slate-200 sticky top-0 z-10">
+                                <tr>
+                                    <th className="px-4 py-3 w-12 text-center">
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedOrders.length === orders.length && orders.length > 0}
+                                            onChange={handleSelectAll}
+                                            className="rounded border-gray-300"
+                                        />
+                                    </th>
+                                    <th className="text-sm font-semibold text-slate-700 px-4 py-3 text-left">Order #</th>
+                                    <th className="text-sm font-semibold text-slate-700 px-4 py-3 text-left">Patient</th>
+                                    <th className="text-sm font-semibold text-slate-700 px-4 py-3 text-left">Procedure</th>
+                                    <th className="text-sm font-semibold text-slate-700 px-4 py-3 text-left">Scheduled</th>
+                                    <th className="text-sm font-semibold text-slate-700 px-4 py-3 text-center">Priority</th>
+                                    <th className="text-sm font-semibold text-slate-700 px-4 py-3 text-center">Status</th>
+                                    <th className="text-sm font-semibold text-slate-700 px-4 py-3 text-center">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {orders.map((order) => (
+                                    <tr key={order.id} className={`border-b border-slate-100 hover:bg-slate-50 transition-colors ${order._offline ? 'bg-amber-50 border-l-4 border-amber-400' : ''}`}>
+                                        <td className="px-4 py-3 text-center">
                                         <input
                                             type="checkbox"
                                             checked={selectedOrders.includes(order.id)}
@@ -361,33 +362,33 @@ export default function IntakeQueueView() {
                                             className="rounded border-gray-300"
                                         />
                                     </td>
-                                    <td className="py-2 pr-4 font-medium">
+                                    <td className="px-4 py-3 font-medium">
                                         {order.order_number}
                                     </td>
-                                    <td className="py-2 pr-4">
-                                        <div className="font-medium">{order.patient_name}</div>
-                                        <div className="text-xs text-slate-500">{order.medical_record_number}</div>
+                                    <td className="px-4 py-3">
+                                        <div className="font-medium text-slate-900">{order.patient_name}</div>
+                                        <div className="text-[11px] text-slate-500 mt-0.5">{order.medical_record_number}</div>
                                     </td>
-                                    <td className="py-2 pr-4">
+                                    <td className="px-4 py-3">
                                         {order.procedure_name || order.requested_procedure}
                                         {order.procedure_count > 1 && (
-                                            <span className="ml-2 badge badge-gray">
+                                            <span className="ml-2 badge badge-gray flex-shrink-0">
                                                 +{order.procedure_count - 1} more
                                             </span>
                                         )}
                                     </td>
-                                    <td className="py-2 pr-4">
+                                    <td className="px-4 py-3 whitespace-nowrap text-slate-600">
                                         {order.scheduled_at ? new Date(order.scheduled_at).toLocaleString() : '-'}
                                     </td>
-                                    <td className="py-2 pr-4">
+                                    <td className="px-4 py-3 text-center">
                                         <span className={`badge ${order.priority === 'stat' || order.priority === 'urgent' ? 'badge-red' : order.priority === 'asap' ? 'badge-yellow' : 'badge-gray'}`}>
                                             {order.priority?.toUpperCase() || 'ROUTINE'}
                                         </span>
                                     </td>
-                                    <td className="py-2 pr-4">
+                                    <td className="px-4 py-3 text-center">
                                         <StatusBadge status={order.status} />
                                     </td>
-                                    <td className="py-2 pr-4 font-medium space-x-2">
+                                    <td className="px-4 py-3 text-center font-medium space-x-2">
                                         {order.status === 'created' && (
                                             <button
                                                 onClick={() => handleSchedule(order.id)}
