@@ -1,0 +1,180 @@
+.order-workflow-page {
+  min-height: calc(100vh - 96px);
+  padding: 24px;
+  color: oklch(0.92 0.01 250);
+  background:
+    radial-gradient(circle at 20% 0%, oklch(0.25 0.035 245 / 0.54), transparent 30%),
+    linear-gradient(135deg, oklch(0.18 0.01 250), oklch(0.13 0.012 250));
+  border-radius: 24px;
+}
+
+.order-workflow-header {
+  max-width: 72ch;
+  margin-bottom: 18px;
+}
+
+.order-workflow-header h1 {
+  margin: 0 0 8px;
+  color: oklch(0.94 0.01 250);
+  font-size: clamp(1.5rem, 2.6vw, 2.25rem);
+  font-weight: 750;
+  letter-spacing: -0.03em;
+}
+
+.order-workflow-header p {
+  margin: 0;
+  color: oklch(0.78 0.012 250);
+  font-size: 0.98rem;
+  line-height: 1.65;
+}
+
+.order-workflow-canvas {
+  height: min(620px, calc(100vh - 240px));
+  min-height: 460px;
+  overflow: hidden;
+  border: 1px solid oklch(0.36 0.014 250);
+  border-radius: 22px;
+  background: oklch(0.17 0.012 250);
+  box-shadow: 0 22px 70px oklch(0.08 0.012 250 / 0.42);
+}
+
+.order-workflow-canvas .react-flow__background {
+  background-color: oklch(0.16 0.012 250);
+}
+
+.order-workflow-canvas .react-flow__background-pattern {
+  color: oklch(0.34 0.01 250 / 0.6);
+}
+
+.order-workflow-canvas .react-flow__controls {
+  overflow: hidden;
+  border: 1px solid oklch(0.35 0.012 250);
+  border-radius: 14px;
+  box-shadow: none;
+}
+
+.order-workflow-canvas .react-flow__controls-button {
+  color: oklch(0.82 0.01 250);
+  background: oklch(0.22 0.012 250);
+  border-bottom-color: oklch(0.35 0.012 250);
+}
+
+.flow-node {
+  width: 230px;
+  min-height: 84px;
+  padding: 14px 16px;
+  border: 1px solid oklch(0.4 0.018 250);
+  border-radius: 18px;
+  background: oklch(0.22 0.014 250);
+  box-shadow: 0 14px 34px oklch(0.08 0.012 250 / 0.28);
+  transition: border-color 260ms ease, box-shadow 260ms ease, transform 260ms ease, background 260ms ease;
+}
+
+.flow-node--active {
+  border-color: oklch(0.7 0.14 235);
+  background: oklch(0.25 0.032 245);
+  box-shadow:
+    0 0 0 1px oklch(0.65 0.13 235 / 0.28),
+    0 0 28px oklch(0.66 0.13 235 / 0.36),
+    0 16px 40px oklch(0.08 0.012 250 / 0.42);
+  transform: translateY(-2px);
+}
+
+.flow-node--done {
+  border-color: oklch(0.68 0.12 155);
+  background: oklch(0.23 0.026 165);
+}
+
+.flow-node__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.flow-node__icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid oklch(0.42 0.018 250);
+  border-radius: 14px;
+  background: oklch(0.28 0.014 250);
+  font-size: 1.2rem;
+}
+
+.flow-node__icon--moving {
+  animation: flow-node-float 1.15s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+}
+
+.flow-node__title {
+  color: oklch(0.94 0.01 250);
+  font-size: 0.95rem;
+  font-weight: 750;
+  letter-spacing: -0.015em;
+}
+
+.flow-node__desc {
+  margin-top: 3px;
+  color: oklch(0.75 0.012 250);
+  font-size: 0.76rem;
+  line-height: 1.38;
+}
+
+.flow-handle {
+  width: 9px !important;
+  height: 9px !important;
+  border: 1px solid oklch(0.86 0.01 250) !important;
+  background: oklch(0.66 0.13 235) !important;
+}
+
+.flow-edge {
+  stroke: oklch(0.48 0.04 245);
+  stroke-width: 2.3;
+  stroke-dasharray: 8 8;
+  animation: flow-data-transfer 1.45s linear infinite;
+}
+
+.flow-edge--active {
+  stroke: oklch(0.72 0.15 235);
+  stroke-width: 3.6;
+  filter: drop-shadow(0 0 7px oklch(0.66 0.13 235 / 0.72));
+  animation-duration: 0.72s;
+}
+
+.order-workflow-canvas .react-flow__edge-path {
+  marker-end: inherit;
+}
+
+.order-workflow-canvas .react-flow__edge-marker path {
+  fill: oklch(0.66 0.13 235);
+}
+
+@keyframes flow-data-transfer {
+  from {
+    stroke-dashoffset: 32;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes flow-node-float {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-4px) scale(1.04);
+  }
+}
+
+@media (max-width: 900px) {
+  .order-workflow-page {
+    padding: 16px;
+    border-radius: 18px;
+  }
+
+  .order-workflow-canvas {
+    height: 560px;
+  }
+}
