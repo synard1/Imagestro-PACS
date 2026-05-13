@@ -4,7 +4,7 @@ import FileList, { FileListStats } from '../components/FileList'
 import { api } from '../services/api'
 import orderService from '../services/orderService'
 import * as procedureService from '../services/procedureService'
-import { generateAccessionAsync } from '../services/accession'
+import { getAccessionNumber } from '../services/accessionServiceClient'
 import { uploadService } from '../services/uploadService'
 import { getPatient } from '../services/patientService'
 import { useEffect, useMemo, useState } from 'react'
@@ -227,7 +227,7 @@ export default function OrderForm() {
     try {
       // Use the modality of the selected procedure, or fallback to form modality
       const mod = form.procedure_modality || form.modality || 'OT'
-      accession = await generateAccessionAsync({ modality: mod })
+      accession = await getAccessionNumber({ modality: mod, patientId: form.patient_id || '' })
     } catch (e) {
       accession = `ACC-${Date.now()}` // Fallback
     }

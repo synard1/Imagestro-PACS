@@ -75,7 +75,11 @@ const DEFAULT_SETTINGS = {
   // Floating Worklist Widget Configuration
   floatingWorklistWidget: {
     enabled: true
-  }
+  },
+
+  // Accession number generation mode
+  // false = client-side (legacy); true = accession-worker (Cloudflare Worker + D1)
+  useServerAccession: false
 };
 
 /**

@@ -17,6 +17,8 @@ type Bindings = {
   SATUSEHAT_INTEGRATOR_URL: string;
   ALLOWED_ORIGINS: string;
   TURNSTILE_SECRET_KEY: string;
+  GATEWAY_SHARED_SECRET: string;
+  ACCESSION_WORKER_URL: string;
   AUTH_RATE_LIMIT_ENABLED?: string;
   AUTH_RATE_LIMIT_WINDOW_SECONDS?: string;
   AUTH_RATE_LIMIT_MAX_ATTEMPTS_IP?: string;
@@ -27,6 +29,9 @@ type Bindings = {
     put: (key: string, value: string, options?: { expirationTtl?: number }) => Promise<void>;
   };
   BACKBONE: {
+    fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+  };
+  ACCESSION_WORKER: {
     fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   };
 }
@@ -302,11 +307,96 @@ async function proxyRequest(c: any, baseUrl: string, targetPath: string, extraHe
   }
 }
 
+// HMAC-SHA256 computation for gateway signature
+async function computeHMAC(data: string, secret: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(data));
+  return Array.from(new Uint8Array(signature))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
 // 4. Routes Mapping
 
 // Root & Health
 app.get('/', (c) => c.json({ status: 'ok', service: 'api-gateway', version: '2.45.0-hono' }));
 app.get('/health', (c) => proxyRequest(c, c.env.PACS_SERVICE_URL, 'api/health'));
+
+// --- Accession Worker Proxy ---
+// Routes /accession-api/* to the accession-worker via Service Binding
+app.all('/accession-api/*', async (c) => {
+  const url = new URL(c.req.url);
+  // Strip /accession-api prefix, preserve remaining path + query string
+  const targetPath = url.pathname.replace('/accession-api', '') + url.search;
+
+  // Build selective headers
+  const headers = new Headers();
+  const forwardHeaders = ['authorization', 'content-type', 'x-request-id'];
+  forwardHeaders.forEach(h => {
+    const val = c.req.header(h);
+    if (val) headers.set(h, val);
+  });
+
+  // Propagate X-Tenant-ID from JWT context
+  const { tenant_id } = await getAuthContext(c);
+  const tenantId = tenant_id ? String(tenant_id) : (c.req.header('x-tenant-id') || '');
+  headers.set('X-Tenant-ID', tenantId);
+
+  // Compute HMAC-SHA256 signature for gateway authentication
+  const requestId = c.req.header('x-request-id') || '';
+  if (c.env.GATEWAY_SHARED_SECRET) {
+    const signature = await computeHMAC(tenantId + requestId, c.env.GATEWAY_SHARED_SECRET);
+    headers.set('X-Gateway-Signature', signature);
+  }
+
+  // Forward body for non-GET methods
+  const body = ['GET', 'HEAD'].includes(c.req.method) ? null : await c.req.arrayBuffer();
+
+  try {
+    let response: Response;
+
+    if (c.env.ACCESSION_WORKER) {
+      // Use Service Binding (zero-latency, no network hop)
+      response = await c.env.ACCESSION_WORKER.fetch(
+        new Request(`https://accession-worker${targetPath}`, {
+          method: c.req.method,
+          headers,
+          body,
+        })
+      );
+    } else {
+      // Fallback to HTTP URL
+      const fallbackUrl = c.env.ACCESSION_WORKER_URL || 'https://accession-worker.satupintudigital.workers.dev';
+      response = await fetch(`${fallbackUrl}${targetPath}`, {
+        method: c.req.method,
+        headers,
+        body,
+      });
+    }
+
+    // Forward response with CORS (already handled by middleware, but ensure content-type)
+    return new Response(response.body, {
+      status: response.status,
+      headers: {
+        'Content-Type': response.headers.get('content-type') || 'application/json',
+      },
+    });
+  } catch (e: any) {
+    console.error('[Accession Proxy Error]', e);
+    return c.json({
+      error: 'Bad Gateway',
+      path: url.pathname,
+      message: e.message || 'Failed to connect to accession worker',
+    }, 502);
+  }
+});
 
 // Turnstile + Rate Limited Login
 app.post('/auth/login', async (c) => {

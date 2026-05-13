@@ -22,6 +22,9 @@ AUTH_RATE_LIMIT_WINDOW_SECONDS = "60"
 AUTH_RATE_LIMIT_MAX_ATTEMPTS_IP = "10"
 AUTH_RATE_LIMIT_MAX_ATTEMPTS_USER = "5"
 AUTH_RATE_LIMIT_BLOCK_SECONDS = "300"
+# Accession Worker fallback URL (used if Service Binding unavailable)
+ACCESSION_WORKER_URL = "https://accession-worker.satupintudigital.workers.dev"
+# GATEWAY_SHARED_SECRET is set via `wrangler secret put GATEWAY_SHARED_SECRET`
 
 [[kv_namespaces]]
 binding = "API_CACHE"
@@ -31,6 +34,11 @@ id = "19df22b7c1764cb7b091e2ed929df9b4"
 binding = "BACKBONE"
 tunnel_id = "5c496701-6046-410a-a870-f20f096c65e4"
 remote = true
+
+# Service Binding to Accession Worker (zero-latency worker-to-worker invocation)
+[[services]]
+binding = "ACCESSION_WORKER"
+service = "accession-worker"
 
 [observability]
 enabled = true

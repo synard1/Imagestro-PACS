@@ -38,6 +38,9 @@ export const DEFAULT_REGISTRY = {
   settings: { enabled: true, baseUrl: "", healthPath: "/health/master", timeoutMs: 5000 },
   mappings: { enabled: true, baseUrl: "", healthPath: "/health/master", timeoutMs: 5000 },
 
+  // Accession Worker (Cloudflare Worker + D1)
+  accession: { enabled: true, baseUrl: "/accession-api", healthPath: "/healthz", timeoutMs: 5000 },
+
   // External Bridges - Keep specific prefixes
   externalSystems: { enabled: true, baseUrl: "", healthPath: "/health", timeoutMs: 5000 },
   nurses: { enabled: true, baseUrl: "", healthPath: "/health/master", timeoutMs: 5000 },

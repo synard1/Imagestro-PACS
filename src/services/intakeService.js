@@ -2,7 +2,7 @@
 // Order Intake & Scheduling Service
 // Handles order verification, scheduling, and check-in for admin radiologi
 
-import { generateAccessionAsync } from './accession';
+import { getAccessionNumber } from './accessionServiceClient';
 import orderService from './orderService';
 import { apiClient } from './http';
 
@@ -103,9 +103,9 @@ export async function createOrderWithProcedures(orderData) {
       const proc = orderData.procedures[i];
       
       // Generate unique accession number for each procedure
-      const accessionNumber = await generateAccessionAsync({
+      const accessionNumber = await getAccessionNumber({
         modality: proc.modality,
-        date: new Date()
+        patientId: orderData.patient_id || ''
       });
 
       const procedure = await createProcedure({
