@@ -19,8 +19,8 @@ import type { Env, SeedingStatus, TenantCreatedEvent } from '../types';
 /** KV TTL: 30 days in seconds */
 const KV_TTL_SECONDS = 2_592_000;
 
-/** VPC tunnel retry configuration: 3 retries with 5s, 10s, 20s backoff */
-const VPC_TUNNEL_RETRY = { maxRetries: 3, delays: [5000, 10000, 20000] };
+/** VPC tunnel retry configuration: 2 retries with 2s, 4s backoff */
+const VPC_TUNNEL_RETRY = { maxRetries: 2, delays: [2000, 4000] };
 
 const seedRoute = new Hono<{ Bindings: Env }>();
 

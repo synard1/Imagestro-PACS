@@ -173,10 +173,19 @@ export class AuthClient {
           );
         }
 
-        const data = await response.json() as { users?: { role: string }[]; data?: { role: string }[] };
-        // Support both response shapes: { users: [...] } or { data: [...] } or direct array
-        const users = data.users ?? data.data ?? (Array.isArray(data) ? data : []);
-        return users as { role: string }[];
+        const data = await response.json() as Record<string, unknown>;
+        // Auth-service returns { data: { users: [...], pagination: {...} } }
+        let users: { role: string }[] = [];
+        if (data.data && typeof data.data === 'object' && 'users' in (data.data as object)) {
+          users = (data.data as { users: { role: string }[] }).users;
+        } else if (Array.isArray(data.users)) {
+          users = data.users as { role: string }[];
+        } else if (Array.isArray(data.data)) {
+          users = data.data as { role: string }[];
+        } else if (Array.isArray(data)) {
+          users = data as unknown as { role: string }[];
+        }
+        return users;
       } catch (error) {
         clearTimeout(timeoutId);
         if ((error as Error).name === 'AbortError') {
