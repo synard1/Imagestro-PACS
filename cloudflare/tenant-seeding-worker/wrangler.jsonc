@@ -1,0 +1,43 @@
+{
+  // Tenant Seeding Worker — Cloudflare Workers
+  // Receives tenant creation events and creates default users via auth-service
+  "name": "tenant-seeding-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-01-15",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // ─── KV Namespace Bindings ──────────────────────────────────────────
+  "kv_namespaces": [
+    {
+      "binding": "API_CACHE",
+      "id": "19df22b7c1764cb7b091e2ed929df9b4"
+    }
+  ],
+
+  // ─── VPC Network Bindings ───────────────────────────────────────────
+  "vpc_networks": [
+    {
+      "binding": "BACKBONE",
+      "tunnel_id": "5c496701-6046-410a-a870-f20f096c65e4",
+      "remote": true
+    }
+  ],
+
+  // ─── Non-Sensitive Environment Variables ────────────────────────────
+  "vars": {
+    "AUTH_SERVICE_URL": "http://auth-service:5000"
+  },
+
+  // ─── Observability ──────────────────────────────────────────────────
+  // head_sampling_rate: 1 = capture all requests
+  // logs.invocation_logs: true = persistent invocation logs
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "invocation_logs": true
+    }
+  }
+}

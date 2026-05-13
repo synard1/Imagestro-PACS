@@ -21,17 +21,16 @@ from app.schemas.subscription import SubscriptionResponse
 from app.middleware.auth import get_current_user
 from app.middleware.rbac import require_permission
 from app.schemas.simrs_config import SIMRSConfig
+import os
 import uuid
-from datetime import datetime, timedelta
-
-router = APIRouter(prefix="/api/tenants", tags=["tenants"])
-
-
-from fastapi import APIRouter, Depends, HTTPException, Query
+import logging
 import httpx
 import time
-from sqlalchemy.orm import Session
-# ... (existing imports)
+from datetime import datetime, timedelta, timezone
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api/tenants", tags=["tenants"])
 
 @router.get("/{tenant_id}/simrs-health")
 async def check_tenant_simrs_health(
@@ -181,7 +180,48 @@ async def create_tenant(
     db.add(db_tenant)
     db.commit()
     db.refresh(db_tenant)
+
+    # Fire-and-forget webhook to tenant-seeding-worker
+    await emit_tenant_created_event(db_tenant)
+
     return db_tenant
+
+
+async def emit_tenant_created_event(tenant):
+    """Fire-and-forget webhook to tenant-seeding-worker.
+
+    Emits a Tenant_Created_Event to the configured webhook URL.
+    Never blocks the tenant creation response - logs WARNING on any failure.
+    """
+    webhook_url = os.getenv("TENANT_SEED_WEBHOOK_URL")
+    gateway_secret = os.getenv("GATEWAY_SHARED_SECRET")
+
+    if not webhook_url:
+        return  # Seeding not configured
+
+    event = {
+        "event_id": str(uuid.uuid4()),
+        "tenant_id": str(tenant.id),
+        "tenant_code": tenant.code,
+        "tenant_name": tenant.name,
+        "tenant_email": tenant.email or "",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    headers = {
+        "Content-Type": "application/json",
+        "X-Gateway-Secret": gateway_secret or "",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            response = await client.post(webhook_url, json=event, headers=headers)
+            if response.status_code != 202:
+                logger.warning(
+                    f"Seed webhook non-202: tenant={tenant.id}, status={response.status_code}"
+                )
+    except Exception as e:
+        logger.warning(f"Seed webhook failed: tenant={tenant.id}, error={str(e)}")
 
 
 @router.get("/{id}", response_model=TenantResponse)
