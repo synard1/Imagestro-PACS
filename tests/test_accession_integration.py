@@ -1,45 +1,54 @@
 #!/usr/bin/env python3
 """
 Accession Worker Integration Test Suite
-Traces the full request chain:
-  Frontend (browser) → Nginx proxy → api-gateway-v2 (Cloudflare Worker)
-    → /accession-api/* → accession-worker (D1 + Durable Objects)
-    → /accession-api/... → existing backend services (orders, patients, worklist, PACS)
+Tests the full accession chain across all three deployment layers:
 
-Run:
-    python tests/test_accession_integration.py
-    python tests/test_accession_integration.py --direct   # hit accession-worker directly (no gateway)
-    python tests/test_accession_integration.py --verbose  # show full response bodies on failures
+  Layer A - Docker backend   : http://100.113.207.79:8082
+  Layer B - Cloudflare Pages : https://imagestro-pacs.pages.dev
+             /backend-api/*  -> dev-pacs-backend.satupintudigital.co.id
+             /accession-api/* -> accession-worker (service binding)
+  Layer C - Direct worker    : https://accession-worker.satupintudigital.workers.dev
+
+Usage:
+    python tests/test_accession_integration.py               # Docker regression + direct worker
+    python tests/test_accession_integration.py --pages       # also test via Cloudflare Pages
+    python tests/test_accession_integration.py --verbose     # show full bodies on failures
+
+Note: Sections 2-9 and 12 require direct Cloudflare connectivity.
+      If VPN/proxy blocks Cloudflare, those sections are skipped automatically.
+      Section 11 (Docker regression) always runs.
 """
 
 import requests
+import requests.utils
 import json
 import sys
 import uuid
-import time
 import argparse
 from datetime import datetime, timezone
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ==============================================================================
 # Configuration
-# ──────────────────────────────────────────────────────────────────────────────
+# ==============================================================================
 
-FRONTEND_PROXY  = "http://100.113.207.79:8082"        # Nginx → api-gateway-v2
-BACKEND_API     = f"{FRONTEND_PROXY}/backend-api"     # gateway routes
-ACCESSION_API   = f"{BACKEND_API}/accession-api"      # → accession-worker via Service Binding
+DOCKER_BASE   = "http://100.113.207.79:8082"                             # Layer A
+DOCKER_API    = f"{DOCKER_BASE}/backend-api"
 
-WORKER_DIRECT   = "https://accession-worker.satupintudigital.workers.dev"  # bypass gateway
+CF_PAGES      = "https://imagestro-pacs.pages.dev"                       # Layer B
+CF_PAGES_API  = f"{CF_PAGES}/backend-api"
+CF_ACCESSION  = f"{CF_PAGES}/accession-api"
 
-GATEWAY_URL     = "https://api-gateway-v2.satupintudigital.workers.dev"    # gateway direct
+WORKER_URL    = "https://accession-worker.satupintudigital.workers.dev"  # Layer C
 
-LOGIN_USERNAME  = "superadmin"
-LOGIN_PASSWORD  = "SuperAdmin123!@#"
+LOGIN_USER    = "superadmin"
+LOGIN_PASS    = "SuperAdmin123!@#"
 
-TIMEOUT         = 20   # seconds per request
+TIMEOUT       = 25  # seconds
+PROBE_TIMEOUT = 5   # for connectivity pre-check
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Output helpers
-# ──────────────────────────────────────────────────────────────────────────────
+# ==============================================================================
+# Helpers
+# ==============================================================================
 
 class C:
     GREEN  = '\033[92m'
@@ -51,718 +60,685 @@ class C:
     DIM    = '\033[2m'
     RESET  = '\033[0m'
 
+PASS = 0
+FAIL = 0
+CF_REACHABLE = False   # set after connectivity probe in section 2
+
 def log(msg, color=C.RESET):
     print(f"{color}{msg}{C.RESET}")
-
-PASS_COUNT = 0
-FAIL_COUNT = 0
-SKIP_COUNT = 0
-
-def test(name, method, url, *, headers=None, json_data=None, params=None,
-         expect_status=None, expect_contains=None, allow_fail=False, verbose=False):
-    """
-    Execute a single HTTP test case.
-    Returns (passed: bool, response_or_None).
-    """
-    global PASS_COUNT, FAIL_COUNT
-    try:
-        r = requests.request(method, url, headers=headers, json=json_data,
-                             params=params, timeout=TIMEOUT)
-
-        # Determine pass/fail
-        if expect_status is not None:
-            passed = r.status_code == expect_status
-        else:
-            passed = r.status_code < 400
-
-        if expect_contains and passed:
-            try:
-                body = r.json()
-            except Exception:
-                body = {}
-            for key, val in expect_contains.items():
-                if body.get(key) != val:
-                    passed = False
-                    break
-
-        if allow_fail:
-            status_str = f"{C.YELLOW}[WARN]{C.RESET}" if not passed else f"{C.GREEN}[PASS]{C.RESET}"
-        else:
-            status_str = f"{C.GREEN}[PASS]{C.RESET}" if passed else f"{C.RED}[FAIL]{C.RESET}"
-
-        short_url = url.replace(FRONTEND_PROXY, "").replace(WORKER_DIRECT, "[direct]")
-        print(f"{status_str} {method:<7} {short_url:<68} -> {r.status_code}")
-
-        if (not passed or verbose) and r.status_code >= 400:
-            try:
-                detail = json.dumps(r.json(), ensure_ascii=False)[:200]
-            except Exception:
-                detail = r.text[:200]
-            print(f"         {C.YELLOW}{detail}{C.RESET}")
-
-        if not allow_fail:
-            if passed:
-                PASS_COUNT += 1
-            else:
-                FAIL_COUNT += 1
-
-        return passed, r
-
-    except requests.exceptions.ConnectionError as e:
-        print(f"{C.RED}[ERR ]{C.RESET} {method:<7} {url[:68]:<68} -> Connection refused")
-        if not allow_fail:
-            FAIL_COUNT += 1
-        return False, None
-    except Exception as e:
-        print(f"{C.RED}[ERR ]{C.RESET} {method:<7} {url[:68]:<68} -> {e}")
-        if not allow_fail:
-            FAIL_COUNT += 1
-        return False, None
-
-
-def section(title):
-    print()
-    print("─" * 110)
-    log(f"  {title}", C.BOLD + C.CYAN)
-    print("─" * 110)
-
 
 def note(msg):
     print(f"         {C.DIM}{msg}{C.RESET}")
 
+def section(title):
+    print()
+    print("-" * 110)
+    log(f"  {title}", C.BOLD + C.CYAN)
+    print("-" * 110)
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Argument parsing
-# ──────────────────────────────────────────────────────────────────────────────
+def skip_section(num, name):
+    section(f"{num}. {name}  (skipped -- Cloudflare unreachable from this network)")
+    note("Run without VPN or from production server to execute this section.")
 
-parser = argparse.ArgumentParser(description="Accession Worker Integration Tests")
-parser.add_argument("--direct", action="store_true",
-                    help="Also run accession-worker endpoints directly (bypassing gateway)")
-parser.add_argument("--verbose", action="store_true",
-                    help="Print response bodies on failures")
-args = parser.parse_args()
+def test(label, method, url, *, headers=None, json_data=None, params=None,
+         expect=None, allow_fail=False):
+    """
+    Run one HTTP request.
+    expect: expected status code (default: any < 400).
+    allow_fail: count as WARN not FAIL when it fails.
+    Returns (passed: bool, response | None).
+    """
+    global PASS, FAIL
+    try:
+        r = requests.request(method, url, headers=headers, json=json_data,
+                             params=params, timeout=TIMEOUT)
+        passed = (r.status_code == expect) if expect is not None else (r.status_code < 400)
 
-VERBOSE = args.verbose
+        tag   = (C.GREEN + "[PASS]" if passed else
+                 C.YELLOW + "[WARN]" if allow_fail else
+                 C.RED    + "[FAIL]") + C.RESET
+        short = url.replace(DOCKER_BASE, "[docker]") \
+                   .replace(CF_PAGES,    "[pages]") \
+                   .replace(WORKER_URL,  "[worker]")
+        print(f"{tag} {method:<7} {short:<68} -> {r.status_code}")
 
-# ──────────────────────────────────────────────────────────────────────────────
-# HEADER
-# ──────────────────────────────────────────────────────────────────────────────
+        if not passed and r.status_code >= 400:
+            try:
+                detail = json.dumps(r.json(), ensure_ascii=False)[:220]
+            except Exception:
+                detail = r.text[:220]
+            print(f"         {C.YELLOW}{detail}{C.RESET}")
+
+        if not allow_fail:
+            if passed: PASS += 1
+            else:       FAIL += 1
+
+        return passed, r
+
+    except requests.exceptions.ConnectionError:
+        print(f"{C.RED}[ERR ]{C.RESET} {method:<7} {url[:70]} -> connection refused")
+        if not allow_fail: FAIL += 1
+        return False, None
+    except Exception as e:
+        print(f"{C.RED}[ERR ]{C.RESET} {method:<7} {url[:70]} -> {e}")
+        if not allow_fail: FAIL += 1
+        return False, None
+
+
+# ==============================================================================
+# Args
+# ==============================================================================
+
+ap = argparse.ArgumentParser()
+ap.add_argument("--pages",   action="store_true", help="include Cloudflare Pages layer tests")
+ap.add_argument("--verbose", action="store_true", help="always print response bodies")
+args = ap.parse_args()
+
+# ==============================================================================
+# Header
+# ==============================================================================
 
 print("=" * 110)
-log("  ACCESSION WORKER FULL-STACK INTEGRATION TEST SUITE", C.BOLD)
-log(f"  Chain: Browser → Nginx({FRONTEND_PROXY}) → Gateway → accession-worker (D1 + DO)", C.DIM)
-log(f"  Started: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}", C.DIM)
+log("  ACCESSION WORKER INTEGRATION TEST SUITE", C.BOLD)
+log(f"  Started : {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}", C.DIM)
+log(f"  Docker  : {DOCKER_API}", C.DIM)
+log(f"  Worker  : {WORKER_URL}", C.DIM)
+log(f"  Pages   : {CF_ACCESSION}  (--pages {'ON' if args.pages else 'OFF'})", C.DIM)
 print("=" * 110)
 
-# ══════════════════════════════════════════════════════════════════════════════
-# 0. GATEWAY HEALTH — verify gateway is up before anything else
-# ══════════════════════════════════════════════════════════════════════════════
+# ==============================================================================
+# SECTION 0 -- Docker backend reachability
+# ==============================================================================
 
-section("0. GATEWAY REACHABILITY")
+section("0. DOCKER BACKEND REACHABILITY")
 
-ok, _ = test("Gateway root", "GET", f"{BACKEND_API}/")
+ok, _ = test("Docker gateway root", "GET", f"{DOCKER_API}/")
 if not ok:
-    log("\nFatal: gateway unreachable at " + BACKEND_API, C.RED)
+    log(f"\nFatal: Docker backend unreachable at {DOCKER_API}", C.RED)
     sys.exit(1)
 
-test("Gateway health (pacs)", "GET", f"{BACKEND_API}/health/pacs")
-test("Gateway health (auth)", "GET", f"{BACKEND_API}/health/auth")
-test("Gateway health (master)", "GET", f"{BACKEND_API}/health/master")
-test("Gateway health (order)", "GET", f"{BACKEND_API}/health/order")
-test("Gateway health (mwl)", "GET", f"{BACKEND_API}/health/mwl")
+for svc in ["auth", "pacs", "master", "order", "mwl", "simrs"]:
+    test(f"Health: {svc}", "GET", f"{DOCKER_API}/health/{svc}")
 
-# ══════════════════════════════════════════════════════════════════════════════
-# 1. AUTHENTICATION  (frontend → gateway → auth-service)
-# ══════════════════════════════════════════════════════════════════════════════
+# ==============================================================================
+# SECTION 1 -- Authentication (Docker backend)
+# ==============================================================================
 
-section("1. AUTHENTICATION  (frontend → gateway → auth-service)")
+section("1. AUTHENTICATION  (docker backend -> auth-service)")
 
-ok, resp = test("POST /auth/login", "POST", f"{BACKEND_API}/auth/login",
-                json_data={"username": LOGIN_USERNAME, "password": LOGIN_PASSWORD},
-                expect_status=200)
-
+ok, resp = test("POST /auth/login", "POST", f"{DOCKER_API}/auth/login",
+                json_data={"username": LOGIN_USER, "password": LOGIN_PASS},
+                expect=200)
 if not ok:
-    log("\nFatal: login failed — cannot continue", C.RED)
+    log("\nFatal: login failed", C.RED)
     sys.exit(1)
 
-body       = resp.json()
-TOKEN      = body.get("access_token") or body.get("token") or ""
-TENANT_ID  = body.get("tenant_id") or ""
-note(f"Token obtained. Tenant ID: {TENANT_ID or '(embedded in JWT)'}")
+body      = resp.json()
+TOKEN     = body.get("access_token") or body.get("token") or ""
+TENANT_ID = body.get("tenant_id") or ""
+note(f"Token acquired. tenant_id={TENANT_ID or '(embedded in JWT)'}")
 
-AUTH  = {"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"}
-ACSN  = {**AUTH, "X-Request-ID": str(uuid.uuid4())}   # headers for accession calls
+AUTH = {"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"}
 
-# ══════════════════════════════════════════════════════════════════════════════
-# 2. ACCESSION-WORKER HEALTH  (via gateway proxy /accession-api/*)
-# ══════════════════════════════════════════════════════════════════════════════
+# ==============================================================================
+# SECTION 2 -- Accession Worker: Health  (direct, no auth needed)
+# ==============================================================================
 
-section("2. ACCESSION-WORKER HEALTH  (via gateway → worker)")
-note(f"Path: {ACCESSION_API}/healthz  → gateway strips /accession-api → worker /healthz")
+section("2. ACCESSION WORKER HEALTH  [worker] direct, no auth required")
+note(f"Target: {WORKER_URL}")
 
-ok, hr = test("GET /accession-api/healthz (no auth required)", "GET",
-              f"{ACCESSION_API}/healthz", expect_status=200)
-if ok and hr:
-    h = hr.json()
-    svc_status = h.get("status", "?")
-    db_status  = h.get("checks", {}).get("db", {}).get("status", "?")
-    db_latency = h.get("checks", {}).get("db", {}).get("latency_ms", "?")
-    note(f"worker status={svc_status}  db={db_status} ({db_latency}ms)  "
-         f"version={h.get('version','?')}  uptime={h.get('uptime_ms','?')}ms")
+# Connectivity probe -- some dev machines block Cloudflare via VPN/proxy
+try:
+    probe = requests.get(f"{WORKER_URL}/healthz", timeout=PROBE_TIMEOUT)
+    CF_REACHABLE = True
+    note("Cloudflare connectivity: OK")
+except Exception:
+    CF_REACHABLE = False
+    log("  [SKIP] Cannot reach Cloudflare Workers from this network (VPN/proxy).", C.YELLOW)
+    log("         Run from the production server or disable VPN to test sections 2-9 and 12.", C.YELLOW)
+    log("         Section 11 (Docker regression) will still run.", C.YELLOW)
 
-ok, rr = test("GET /accession-api/readyz (no auth required)", "GET",
-              f"{ACCESSION_API}/readyz", expect_status=200)
-if ok and rr:
-    note(f"readyz ready={rr.json().get('ready')}")
+if CF_REACHABLE:
+    ok, hr = test("GET /healthz", "GET", f"{WORKER_URL}/healthz", expect=200)
+    if ok and hr:
+        h = hr.json()
+        note(f"status={h.get('status')}  db={h.get('checks',{}).get('db',{}).get('status')}  "
+             f"version={h.get('version','?')}  uptime={h.get('uptime_ms','?')}ms")
 
-# ══════════════════════════════════════════════════════════════════════════════
-# 3. ACCESSION CONFIG/SETTINGS  (authenticated)
-# ══════════════════════════════════════════════════════════════════════════════
+    ok, rr = test("GET /readyz", "GET", f"{WORKER_URL}/readyz", expect=200)
+    if ok and rr:
+        note(f"ready={rr.json().get('ready')}")
 
-section("3. ACCESSION CONFIG  (frontend → gateway → worker /settings/accession_config)")
+# ==============================================================================
+# SECTION 3 -- Accession Config  (direct worker, authenticated)
+# ==============================================================================
 
-ok, cfg_resp = test("GET /settings/accession_config", "GET",
-                    f"{ACCESSION_API}/settings/accession_config",
-                    headers=AUTH, expect_status=200)
+if not CF_REACHABLE:
+    skip_section(3, "ACCESSION CONFIG  [worker] GET/PUT /settings/accession_config")
+else:
+    section("3. ACCESSION CONFIG  [worker] GET/PUT /settings/accession_config")
 
-original_pattern = None
-if ok and cfg_resp:
-    cfg = cfg_resp.json()
-    original_pattern = cfg.get("pattern")
-    note(f"Current config: pattern={original_pattern}  "
-         f"reset_policy={cfg.get('counter_reset_policy')}  "
-         f"seq_digits={cfg.get('sequence_digits')}")
+    ok, cfg = test("GET /settings/accession_config", "GET",
+                   f"{WORKER_URL}/settings/accession_config",
+                   headers=AUTH, expect=200)
 
-# PUT — update pattern (must convert UI {SEQ4} → worker {NNNN} format)
-new_pattern = "{ORG}-{YYYY}{MM}{DD}-{NNNN}"
-ok, _ = test("PUT /settings/accession_config", "PUT",
-             f"{ACCESSION_API}/settings/accession_config",
+    orig_pattern = None
+    if ok and cfg:
+        c = cfg.json()
+        orig_pattern = c.get("pattern")
+        note(f"pattern={orig_pattern}  reset={c.get('counter_reset_policy')}  "
+             f"digits={c.get('sequence_digits')}")
+
+    test("PUT /settings/accession_config (valid)", "PUT",
+         f"{WORKER_URL}/settings/accession_config",
+         headers=AUTH,
+         json_data={"pattern": "{ORG}-{YYYY}{MM}{DD}-{NNNN}",
+                    "counter_reset_policy": "daily",
+                    "sequence_digits": 4,
+                    "timezone": "Asia/Jakarta",
+                    "counter_backend": "D1"},
+         expect=200)
+
+    test("PUT /settings/accession_config (invalid pattern -> 400)", "PUT",
+         f"{WORKER_URL}/settings/accession_config",
+         headers=AUTH, json_data={"pattern": "!!!INVALID!!!"}, expect=400, allow_fail=True)
+
+    if orig_pattern:
+        test("PUT /settings/accession_config (restore)", "PUT",
+             f"{WORKER_URL}/settings/accession_config",
              headers=AUTH,
-             json_data={
-                 "pattern": new_pattern,
-                 "counter_reset_policy": "daily",
-                 "sequence_digits": 4,
-                 "timezone": "Asia/Jakarta",
-                 "counter_backend": "D1"
-             },
-             expect_status=200)
+             json_data={"pattern": orig_pattern, "counter_reset_policy": "daily",
+                        "sequence_digits": 4, "timezone": "Asia/Jakarta",
+                        "counter_backend": "D1"},
+             expect=200, allow_fail=True)
+        note("Pattern restored")
 
-# PUT — invalid pattern (should get 400)
-test("PUT /settings/accession_config (invalid pattern → 400)", "PUT",
-     f"{ACCESSION_API}/settings/accession_config",
-     headers=AUTH,
-     json_data={"pattern": "!!!BAD-PATTERN!!!"},
-     expect_status=400, allow_fail=True)
+# ==============================================================================
+# SECTION 4 -- Single Accession CRUD  (direct worker)
+# ==============================================================================
 
-# Restore original pattern if we had one
-if original_pattern:
-    test("PUT /settings/accession_config (restore)", "PUT",
-         f"{ACCESSION_API}/settings/accession_config",
-         headers=AUTH,
-         json_data={
-             "pattern": original_pattern,
-             "counter_reset_policy": "daily",
-             "sequence_digits": 4,
-             "timezone": "Asia/Jakarta",
-             "counter_backend": "D1"
-         },
-         expect_status=200, allow_fail=True)
-    note("Config restored to original pattern")
+if not CF_REACHABLE:
+    skip_section(4, "SINGLE ACCESSION CRUD  [worker] /api/accessions")
+else:
+    section("4. SINGLE ACCESSION CRUD  [worker] /api/accessions")
+    note("Simulates: OrderForm.jsx -> accessionServiceClient.getAccessionNumber() -> worker")
 
-# ══════════════════════════════════════════════════════════════════════════════
-# 4. SINGLE ACCESSION — CREATE / READ / PATCH / DELETE
-# ══════════════════════════════════════════════════════════════════════════════
+    req_id   = str(uuid.uuid4())
+    idem_key = str(uuid.uuid4())
 
-section("4. SINGLE ACCESSION CRUD  (frontend → gateway → worker /api/accessions)")
-
-req_id   = str(uuid.uuid4())
-idem_key = str(uuid.uuid4())
-
-# 4a. CREATE (POST /api/accessions)
-note("Simulating OrderForm.jsx → accessionServiceClient.createAccession() flow")
-create_headers = {**AUTH, "X-Request-ID": req_id, "X-Idempotency-Key": idem_key}
-
-ok, cr = test("POST /api/accessions (create, nested format)", "POST",
-              f"{ACCESSION_API}/api/accessions",
-              headers=create_headers,
-              json_data={
-                  "modality": "CT",
-                  "patient": {
-                      "id": "TEST-MRN-001",
-                      "national_id": "3273010101900001",
-                      "name": "Integration Test Patient"
-                  }
-              },
-              expect_status=201)
-
-created_accession_number = None
-if ok and cr:
-    rb = cr.json()
-    created_accession_number = rb.get("accession_number")
-    note(f"Created: accession_number={created_accession_number}  "
-         f"id={rb.get('id','?')}  source={rb.get('source','?')}")
-    # Verify X-Request-ID was echoed back
-    if cr.headers.get("X-Request-ID") == req_id:
-        note("✓ X-Request-ID propagated correctly through gateway → worker")
-
-# 4b. IDEMPOTENCY — same key should return cached 200
-if created_accession_number:
-    ok, idem_r = test("POST /api/accessions (idempotency replay → 200)", "POST",
-                      f"{ACCESSION_API}/api/accessions",
-                      headers=create_headers,   # same X-Idempotency-Key
-                      json_data={
-                          "modality": "CT",
-                          "patient": {
-                              "id": "TEST-MRN-001",
-                              "national_id": "3273010101900001",
-                              "name": "Integration Test Patient"
-                          }
-                      },
-                      expect_status=200)
-    if ok and idem_r:
-        note(f"Idempotency replay returned same accession: "
-             f"{idem_r.json().get('accession_number')}")
-
-# 4c. GET by accession number
-if created_accession_number:
-    ok, gr = test(f"GET /api/accessions/{created_accession_number}", "GET",
-                  f"{ACCESSION_API}/api/accessions/{requests.utils.quote(created_accession_number, safe='')}",
-                  headers=AUTH, expect_status=200)
-    if ok and gr:
-        note(f"Retrieved: modality={gr.json().get('modality')}  "
-             f"X-D1-Replica={gr.headers.get('X-D1-Replica','?')}")
-
-    # Strong consistency read (X-Consistency: strong → use primary DB)
-    ok, sr = test("GET /api/accessions/:num (X-Consistency: strong)", "GET",
-                  f"{ACCESSION_API}/api/accessions/{requests.utils.quote(created_accession_number, safe='')}",
-                  headers={**AUTH, "X-Consistency": "strong"},
-                  expect_status=200, allow_fail=True)
-    if ok and sr:
-        note(f"Strong consistency: X-D1-Replica={sr.headers.get('X-D1-Replica','?')}")
-
-# 4d. GET non-existent → 404
-test("GET /api/accessions/DOES-NOT-EXIST (→ 404)", "GET",
-     f"{ACCESSION_API}/api/accessions/DOES-NOT-EXIST-99999",
-     headers=AUTH, expect_status=404, allow_fail=True)
-
-# 4e. LIST with filters
-ok, lr = test("GET /api/accessions (list, no filter)", "GET",
-              f"{ACCESSION_API}/api/accessions",
-              headers=AUTH, expect_status=200)
-if ok and lr:
-    lb = lr.json()
-    count  = len(lb.get("items", []))
-    cursor = lb.get("next_cursor")
-    note(f"List returned {count} items  has_more={lb.get('has_more')}  "
-         f"next_cursor={'set' if cursor else 'null'}")
-
-test("GET /api/accessions?modality=CT", "GET",
-     f"{ACCESSION_API}/api/accessions",
-     headers=AUTH, params={"modality": "CT"}, expect_status=200)
-
-test("GET /api/accessions?source=internal", "GET",
-     f"{ACCESSION_API}/api/accessions",
-     headers=AUTH, params={"source": "internal"}, expect_status=200)
-
-test("GET /api/accessions?limit=5", "GET",
-     f"{ACCESSION_API}/api/accessions",
-     headers=AUTH, params={"limit": "5"}, expect_status=200)
-
-# 4f. PATCH
-if created_accession_number:
-    ok, pr = test("PATCH /api/accessions/:num (update note)", "PATCH",
-                  f"{ACCESSION_API}/api/accessions/{requests.utils.quote(created_accession_number, safe='')}",
-                  headers=AUTH,
-                  json_data={"note": "Patched by integration test"},
-                  expect_status=200, allow_fail=True)
-    if ok and pr:
-        note(f"Patched note: {pr.json().get('note','?')}")
-
-# 4g. PATCH — attempt immutable field (accession_number) → 422
-if created_accession_number:
-    test("PATCH — immutable field accession_number (→ 422)", "PATCH",
-         f"{ACCESSION_API}/api/accessions/{requests.utils.quote(created_accession_number, safe='')}",
-         headers=AUTH,
-         json_data={"accession_number": "HACKED-001"},
-         expect_status=422, allow_fail=True)
-
-# 4h. DELETE without ?confirm=true → 400
-if created_accession_number:
-    test("DELETE without ?confirm=true (→ 400)", "DELETE",
-         f"{ACCESSION_API}/api/accessions/{requests.utils.quote(created_accession_number, safe='')}",
-         headers=AUTH, expect_status=400, allow_fail=True)
-
-# 4i. DELETE with ?confirm=true (soft delete)
-if created_accession_number:
-    test("DELETE /api/accessions/:num?confirm=true (soft delete → 204)", "DELETE",
-         f"{ACCESSION_API}/api/accessions/{requests.utils.quote(created_accession_number, safe='')}",
-         headers=AUTH, params={"confirm": "true"},
-         expect_status=204, allow_fail=True)
-
-    # Verify soft-deleted record is hidden by default
-    ok, _ = test("GET deleted accession (default → 404)", "GET",
-                 f"{ACCESSION_API}/api/accessions/{requests.utils.quote(created_accession_number, safe='')}",
-                 headers=AUTH, expect_status=404, allow_fail=True)
-
-    # Verify it's visible with include_deleted=true
-    test("GET deleted accession (?include_deleted=true → 200)", "GET",
-         f"{ACCESSION_API}/api/accessions/{requests.utils.quote(created_accession_number, safe='')}",
-         headers=AUTH, params={"include_deleted": "true"},
-         expect_status=200, allow_fail=True)
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 5. BATCH ACCESSION  (simulates multi-procedure order from OrderForm.jsx)
-# ══════════════════════════════════════════════════════════════════════════════
-
-section("5. BATCH ACCESSION  (frontend prepareOrderAccessions() → POST /api/accessions/batch)")
-note("Simulates createAccessionBatch() called when an order has >1 procedure")
-
-batch_idem = str(uuid.uuid4())
-batch_headers = {**AUTH, "X-Request-ID": str(uuid.uuid4()), "X-Idempotency-Key": batch_idem}
-
-ok, br = test("POST /api/accessions/batch (2 procedures)", "POST",
-              f"{ACCESSION_API}/api/accessions/batch",
-              headers=batch_headers,
-              json_data={
-                  "procedures": [
-                      {"modality": "CT", "procedure_code": "CT-CHEST-001",
-                       "procedure_name": "CT Thorax"},
-                      {"modality": "MR", "procedure_code": "MR-BRAIN-001",
-                       "procedure_name": "MRI Kepala"}
-                  ],
-                  "patient_national_id": "3273010101900001",
-                  "patient_name": "Integration Test Patient"
-              },
-              expect_status=201)
-
-if ok and br:
-    batch_body = br.json()
-    accs = batch_body.get("accessions", [])
-    note(f"Batch created {len(accs)} accession(s):")
-    for a in accs:
-        note(f"  modality={a.get('modality','?')}  "
-             f"code={a.get('procedure_code','?')}  "
-             f"accession={a.get('accession_number','?')}")
-
-# Batch idempotency replay
-test("POST /api/accessions/batch (idempotency replay → 200)", "POST",
-     f"{ACCESSION_API}/api/accessions/batch",
-     headers=batch_headers,   # same idem key
-     json_data={
-         "procedures": [
-             {"modality": "CT", "procedure_code": "CT-CHEST-001",
-              "procedure_name": "CT Thorax"},
-             {"modality": "MR", "procedure_code": "MR-BRAIN-001",
-              "procedure_name": "MRI Kepala"}
-         ],
-         "patient_national_id": "3273010101900001",
-         "patient_name": "Integration Test Patient"
-     },
-     expect_status=200, allow_fail=True)
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 6. LEGACY ENDPOINTS  (backward compat for order-management / pacs-service)
-# ══════════════════════════════════════════════════════════════════════════════
-
-section("6. LEGACY ENDPOINTS  (/accession/create, /accession/batch)")
-note("These endpoints use flat format, consumed by order-management and pacs-service")
-
-ok, leg = test("POST /accession/create (flat format)", "POST",
-               f"{ACCESSION_API}/accession/create",
-               headers=AUTH,
-               json_data={
-                   "modality": "DX",
-                   "patient_national_id": "3273010101900002",
-                   "patient_name": "Legacy Test Patient",
-                   "medical_record_number": "MRN-LEGACY-001",
-                   "procedure_code": "DX-CHEST",
-                   "procedure_name": "Foto Thorax"
-               },
-               expect_status=201)
-if ok and leg:
-    note(f"Legacy single: accession_number={leg.json().get('accession_number','?')}")
-
-ok, legb = test("POST /accession/batch (flat format, 2 items)", "POST",
-                f"{ACCESSION_API}/accession/batch",
-                headers=AUTH,
-                json_data={
-                    "procedures": [
-                        {"modality": "US", "procedure_code": "US-ABD-001",
-                         "procedure_name": "USG Abdomen"},
-                        {"modality": "XA", "procedure_code": "XA-KNEE-001",
-                         "procedure_name": "X-ray Lutut"}
-                    ],
-                    "patient_national_id": "3273010101900003",
-                    "patient_name": "Legacy Batch Patient"
-                },
-                expect_status=201)
-if ok and legb:
-    items = legb.json().get("accessions", [])
-    note(f"Legacy batch: {len(items)} accession(s) created")
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 7. ERROR HANDLING & VALIDATION
-# ══════════════════════════════════════════════════════════════════════════════
-
-section("7. ERROR HANDLING & VALIDATION")
-
-# 7a. Missing required fields → 400
-test("POST /api/accessions — missing modality (→ 400)", "POST",
-     f"{ACCESSION_API}/api/accessions",
-     headers=AUTH,
-     json_data={"patient": {"national_id": "3273010101900001"}},
-     expect_status=400, allow_fail=True)
-
-# 7b. Invalid modality → 400
-test("POST /api/accessions — invalid modality (→ 400)", "POST",
-     f"{ACCESSION_API}/api/accessions",
-     headers=AUTH,
-     json_data={"modality": "INVALIDMOD", "patient": {"national_id": "1234"}},
-     expect_status=400, allow_fail=True)
-
-# 7c. No auth → 401
-test("GET /api/accessions — no auth (→ 401)", "GET",
-     f"{ACCESSION_API}/api/accessions",
-     expect_status=401, allow_fail=True)
-
-# 7d. Batch > 20 procedures → 400
-test("POST /api/accessions/batch — too many items (→ 400)", "POST",
-     f"{ACCESSION_API}/api/accessions/batch",
-     headers=AUTH,
-     json_data={
-         "procedures": [
-             {"modality": "CT", "procedure_code": f"P-{i:03d}", "procedure_name": f"Proc {i}"}
-             for i in range(21)
-         ],
-         "patient_national_id": "3273010101900001",
-         "patient_name": "Overflow Patient"
-     },
-     expect_status=400, allow_fail=True)
-
-# 7e. Duplicate procedure_code in batch → 400
-test("POST /api/accessions/batch — duplicate procedure_code (→ 400)", "POST",
-     f"{ACCESSION_API}/api/accessions/batch",
-     headers=AUTH,
-     json_data={
-         "procedures": [
-             {"modality": "CT", "procedure_code": "SAME-CODE", "procedure_name": "First"},
-             {"modality": "MR", "procedure_code": "SAME-CODE", "procedure_name": "Dupe"}
-         ],
-         "patient_national_id": "3273010101900001",
-         "patient_name": "Dupe Patient"
-     },
-     expect_status=400, allow_fail=True)
-
-# 7f. Invalid idempotency key format → 400
-test("POST /api/accessions — invalid idempotency key (→ 400)", "POST",
-     f"{ACCESSION_API}/api/accessions",
-     headers={**AUTH, "X-Idempotency-Key": "not-a-uuid!!!"},
-     json_data={"modality": "CT", "patient": {"national_id": "3273010101900001"}},
-     expect_status=400, allow_fail=True)
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 8. GATEWAY HEADERS — verify HMAC signature plumbing
-# ══════════════════════════════════════════════════════════════════════════════
-
-section("8. GATEWAY HEADERS & SIGNATURE PLUMBING")
-note("Verify X-Request-ID is echoed and X-D1-Replica is set on list/get responses")
-
-probe_req_id = str(uuid.uuid4())
-ok, probe_r = test("GET /api/accessions (header probe)", "GET",
-                   f"{ACCESSION_API}/api/accessions",
-                   headers={**AUTH, "X-Request-ID": probe_req_id},
-                   expect_status=200)
-if ok and probe_r:
-    echoed = probe_r.headers.get("X-Request-ID", "")
-    replica = probe_r.headers.get("X-D1-Replica", "")
-    note(f"X-Request-ID echoed={echoed == probe_req_id}  X-D1-Replica={replica}")
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 9. ADMIN ENDPOINTS  (require admin role in JWT)
-# ══════════════════════════════════════════════════════════════════════════════
-
-section("9. ADMIN ENDPOINTS  (/admin/run-job)")
-
-# These may return 403 if the JWT doesn't contain admin role for the worker tenant
-test("POST /admin/run-job/idempotency_cleanup", "POST",
-     f"{ACCESSION_API}/admin/run-job/idempotency_cleanup",
-     headers=AUTH, expect_status=200, allow_fail=True)
-
-test("POST /admin/run-job/soft_delete_purge", "POST",
-     f"{ACCESSION_API}/admin/run-job/soft_delete_purge",
-     headers=AUTH, expect_status=200, allow_fail=True)
-
-test("POST /admin/run-job/unknown (→ 400)", "POST",
-     f"{ACCESSION_API}/admin/run-job/unknown",
-     headers=AUTH, expect_status=400, allow_fail=True)
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 10. DIRECT WORKER TESTS  (optional, --direct flag)
-# ══════════════════════════════════════════════════════════════════════════════
-
-if args.direct:
-    section("10. DIRECT WORKER  (bypassing gateway, hitting accession-worker URL directly)")
-    note(f"Target: {WORKER_DIRECT}")
-    note("Auth: still uses gateway JWT — worker accepts same JWT_SECRET")
-
-    test("GET /healthz (direct)", "GET",
-         f"{WORKER_DIRECT}/healthz", expect_status=200)
-
-    test("GET /readyz (direct)", "GET",
-         f"{WORKER_DIRECT}/readyz", expect_status=200)
-
-    test("GET /api/accessions (direct, JWT auth)", "GET",
-         f"{WORKER_DIRECT}/api/accessions",
-         headers=AUTH, expect_status=200, allow_fail=True)
-
-    ok, dr = test("POST /api/accessions (direct)", "POST",
-                  f"{WORKER_DIRECT}/api/accessions",
-                  headers={**AUTH, "X-Request-ID": str(uuid.uuid4())},
+    # 4a. CREATE
+    ok, cr = test("POST /api/accessions (create, 201)", "POST",
+                  f"{WORKER_URL}/api/accessions",
+                  headers={**AUTH, "X-Request-ID": req_id, "X-Idempotency-Key": idem_key},
                   json_data={
-                      "modality": "NM",
+                      "modality": "CT",
                       "patient": {
-                          "national_id": "3273010101900099",
-                          "name": "Direct Test Patient"
+                          "id": "MRN-INTTEST-001",
+                          "national_id": "3273010101900001",
+                          "name": "Integration Test Patient"
                       }
                   },
-                  expect_status=201, allow_fail=True)
-    if ok and dr:
-        note(f"Direct create: {dr.json().get('accession_number','?')}")
+                  expect=201)
+
+    created_acsn = None
+    if ok and cr:
+        rb = cr.json()
+        created_acsn = rb.get("accession_number")
+        note(f"Created: accession_number={created_acsn}  source={rb.get('source')}  "
+             f"id={str(rb.get('id','?'))[:16]}...")
+        if cr.headers.get("X-Request-ID") == req_id:
+            note("OK X-Request-ID echoed correctly")
+
+    # 4b. Idempotency replay (same key -> 200 cached)
+    if created_acsn:
+        ok, ir = test("POST /api/accessions (idempotency replay -> 200)", "POST",
+                      f"{WORKER_URL}/api/accessions",
+                      headers={**AUTH, "X-Request-ID": req_id, "X-Idempotency-Key": idem_key},
+                      json_data={"modality": "CT",
+                                 "patient": {"id": "MRN-INTTEST-001",
+                                             "national_id": "3273010101900001",
+                                             "name": "Integration Test Patient"}},
+                      expect=200)
+        if ok and ir:
+            note(f"Idempotency replay returned same acsn: {ir.json().get('accession_number')}")
+
+    # 4c. GET single
+    if created_acsn:
+        enc = requests.utils.quote(created_acsn, safe='')
+        ok, gr = test("GET /api/accessions/:num", "GET",
+                      f"{WORKER_URL}/api/accessions/{enc}",
+                      headers=AUTH, expect=200)
+        if ok and gr:
+            note(f"Retrieved: modality={gr.json().get('modality')}  "
+                 f"X-D1-Replica={gr.headers.get('X-D1-Replica','?')}")
+
+        test("GET /api/accessions/:num (X-Consistency: strong)", "GET",
+             f"{WORKER_URL}/api/accessions/{enc}",
+             headers={**AUTH, "X-Consistency": "strong"},
+             expect=200, allow_fail=True)
+
+    # 4d. GET non-existent -> 404
+    test("GET /api/accessions/DOES-NOT-EXIST (-> 404)", "GET",
+         f"{WORKER_URL}/api/accessions/DOES-NOT-EXIST-99999",
+         headers=AUTH, expect=404, allow_fail=True)
+
+    # 4e. LIST
+    ok, lr = test("GET /api/accessions (list)", "GET",
+                  f"{WORKER_URL}/api/accessions",
+                  headers=AUTH, expect=200)
+    if ok and lr:
+        lb = lr.json()
+        note(f"List: {len(lb.get('items',[]))} items  has_more={lb.get('has_more')}  "
+             f"cursor={'set' if lb.get('next_cursor') else 'null'}")
+
+    test("GET /api/accessions?modality=CT", "GET",
+         f"{WORKER_URL}/api/accessions",
+         headers=AUTH, params={"modality": "CT"}, expect=200)
+
+    test("GET /api/accessions?source=internal&limit=5", "GET",
+         f"{WORKER_URL}/api/accessions",
+         headers=AUTH, params={"source": "internal", "limit": "5"}, expect=200)
+
+    # 4f. PATCH
+    if created_acsn:
+        enc = requests.utils.quote(created_acsn, safe='')
+        test("PATCH /api/accessions/:num (update note)", "PATCH",
+             f"{WORKER_URL}/api/accessions/{enc}",
+             headers=AUTH, json_data={"note": "Patched by integration test"},
+             expect=200, allow_fail=True)
+
+        test("PATCH /api/accessions/:num immutable field (-> 422)", "PATCH",
+             f"{WORKER_URL}/api/accessions/{enc}",
+             headers=AUTH, json_data={"accession_number": "HACKED"},
+             expect=422, allow_fail=True)
+
+    # 4g. DELETE (soft)
+    if created_acsn:
+        enc = requests.utils.quote(created_acsn, safe='')
+        test("DELETE without ?confirm=true (-> 400)", "DELETE",
+             f"{WORKER_URL}/api/accessions/{enc}",
+             headers=AUTH, expect=400, allow_fail=True)
+
+        test("DELETE ?confirm=true (soft delete -> 204)", "DELETE",
+             f"{WORKER_URL}/api/accessions/{enc}",
+             headers=AUTH, params={"confirm": "true"},
+             expect=204, allow_fail=True)
+
+        test("GET deleted record (default -> 404)", "GET",
+             f"{WORKER_URL}/api/accessions/{enc}",
+             headers=AUTH, expect=404, allow_fail=True)
+
+        test("GET deleted record (?include_deleted=true -> 200)", "GET",
+             f"{WORKER_URL}/api/accessions/{enc}",
+             headers=AUTH, params={"include_deleted": "true"},
+             expect=200, allow_fail=True)
+
+# ==============================================================================
+# SECTION 5 -- Batch Accession  (direct worker)
+# ==============================================================================
+
+if not CF_REACHABLE:
+    skip_section(5, "BATCH ACCESSION  [worker] POST /api/accessions/batch")
 else:
-    section("10. DIRECT WORKER  (skipped — run with --direct to enable)")
+    section("5. BATCH ACCESSION  [worker] POST /api/accessions/batch")
+    note("Simulates: prepareOrderAccessions() -> createAccessionBatch() -> worker")
 
-# ══════════════════════════════════════════════════════════════════════════════
-# 11. FULL-STACK REGRESSION — existing services must still work
-# ══════════════════════════════════════════════════════════════════════════════
+    batch_idem = str(uuid.uuid4())
+    ok, br = test("POST /api/accessions/batch (2 procedures, 201)", "POST",
+                  f"{WORKER_URL}/api/accessions/batch",
+                  headers={**AUTH, "X-Request-ID": str(uuid.uuid4()),
+                           "X-Idempotency-Key": batch_idem},
+                  json_data={
+                      "procedures": [
+                          {"modality": "CT", "procedure_code": "CT-CHEST-INT",
+                           "procedure_name": "CT Thorax"},
+                          {"modality": "MR", "procedure_code": "MR-BRAIN-INT",
+                           "procedure_name": "MRI Kepala"}
+                      ],
+                      "patient_national_id": "3273010101900002",
+                      "patient_name": "Batch Test Patient"
+                  },
+                  expect=201)
+    if ok and br:
+        accs = br.json().get("accessions", [])
+        note(f"Batch created {len(accs)} accessions:")
+        for a in accs:
+            note(f"  modality={a.get('modality')}  code={a.get('procedure_code')}  "
+                 f"acsn={a.get('accession_number')}")
 
-section("11. FULL-STACK REGRESSION  (gateway → existing backend services)")
-note("Ensure accession-worker routing did not break other gateway routes")
+    test("POST /api/accessions/batch (idempotency replay -> 200)", "POST",
+         f"{WORKER_URL}/api/accessions/batch",
+         headers={**AUTH, "X-Idempotency-Key": batch_idem},
+         json_data={
+             "procedures": [
+                 {"modality": "CT", "procedure_code": "CT-CHEST-INT",
+                  "procedure_name": "CT Thorax"},
+                 {"modality": "MR", "procedure_code": "MR-BRAIN-INT",
+                  "procedure_name": "MRI Kepala"}
+             ],
+             "patient_national_id": "3273010101900002",
+             "patient_name": "Batch Test Patient"
+         },
+         expect=200, allow_fail=True)
 
-# 11a. Master data services
-test("GET /patients", "GET", f"{BACKEND_API}/patients", headers=AUTH)
-test("GET /doctors", "GET", f"{BACKEND_API}/doctors", headers=AUTH)
-test("GET /procedures", "GET", f"{BACKEND_API}/procedures", headers=AUTH)
-test("GET /procedure-mappings", "GET", f"{BACKEND_API}/procedure-mappings", headers=AUTH)
-test("GET /modalities", "GET", f"{BACKEND_API}/modalities", headers=AUTH, allow_fail=True)
-test("GET /nurses", "GET", f"{BACKEND_API}/nurses", headers=AUTH, allow_fail=True)
-test("GET /settings", "GET", f"{BACKEND_API}/settings", headers=AUTH, allow_fail=True)
+# ==============================================================================
+# SECTION 6 -- Legacy Endpoints  (direct worker)
+# ==============================================================================
 
-# 11b. Order management
-test("GET /orders", "GET", f"{BACKEND_API}/orders", headers=AUTH)
-test("GET /worklist", "GET", f"{BACKEND_API}/worklist", headers=AUTH, allow_fail=True)
+if not CF_REACHABLE:
+    skip_section(6, "LEGACY ENDPOINTS  [worker] /accession/create, /accession/batch")
+else:
+    section("6. LEGACY ENDPOINTS  [worker] /accession/create, /accession/batch")
+    note("Flat format -- consumed by order-management and pacs-service")
 
-# 11c. PACS / studies
-ok, sl = test("GET /api/studies", "GET", f"{BACKEND_API}/api/studies", headers=AUTH)
+    ok, leg = test("POST /accession/create (flat format -> 201)", "POST",
+                   f"{WORKER_URL}/accession/create",
+                   headers=AUTH,
+                   json_data={"modality": "DX",
+                              "patient_national_id": "3273010101900003",
+                              "patient_name": "Legacy Patient",
+                              "medical_record_number": "MRN-LEG-001",
+                              "procedure_code": "DX-CHEST",
+                              "procedure_name": "Foto Thorax"},
+                   expect=201)
+    if ok and leg:
+        note(f"Legacy single acsn={leg.json().get('accession_number')}")
 
-# 11d. Auth / users
-test("GET /auth/users", "GET", f"{BACKEND_API}/auth/users", headers=AUTH)
-test("GET /users", "GET", f"{BACKEND_API}/users", headers=AUTH, allow_fail=True)
+    ok, legb = test("POST /accession/batch (flat format, 2 items -> 201)", "POST",
+                    f"{WORKER_URL}/accession/batch",
+                    headers=AUTH,
+                    json_data={
+                        "procedures": [
+                            {"modality": "US", "procedure_code": "US-ABD",
+                             "procedure_name": "USG Abdomen"},
+                            {"modality": "XA", "procedure_code": "XA-KNEE",
+                             "procedure_name": "X-ray Lutut"}
+                        ],
+                        "patient_national_id": "3273010101900004",
+                        "patient_name": "Legacy Batch Patient"
+                    },
+                    expect=201)
+    if ok and legb:
+        note(f"Legacy batch: {len(legb.json().get('accessions',[]))} accessions created")
 
-# 11e. SIMRS / Khanza
-test("GET /simrs-universal/health", "GET",
-     f"{BACKEND_API}/simrs-universal/health", headers=AUTH, allow_fail=True)
-test("GET /khanza/health", "GET",
-     f"{BACKEND_API}/khanza/health", headers=AUTH, allow_fail=True)
+# ==============================================================================
+# SECTION 7 -- Validation / Error Handling  (direct worker)
+# ==============================================================================
 
-# 11f. SatuSehat / monitor
+if not CF_REACHABLE:
+    skip_section(7, "ERROR HANDLING & VALIDATION  [worker]")
+else:
+    section("7. ERROR HANDLING & VALIDATION  [worker]")
+
+    test("POST /api/accessions missing modality (-> 400)", "POST",
+         f"{WORKER_URL}/api/accessions",
+         headers=AUTH,
+         json_data={"patient": {"national_id": "3273010101900001"}},
+         expect=400, allow_fail=True)
+
+    test("POST /api/accessions invalid modality (-> 400)", "POST",
+         f"{WORKER_URL}/api/accessions",
+         headers=AUTH,
+         json_data={"modality": "BADMOD", "patient": {"national_id": "1234"}},
+         expect=400, allow_fail=True)
+
+    test("GET /api/accessions no auth (-> 401)", "GET",
+         f"{WORKER_URL}/api/accessions",
+         expect=401, allow_fail=True)
+
+    test("POST /api/accessions/batch > 20 items (-> 400)", "POST",
+         f"{WORKER_URL}/api/accessions/batch",
+         headers=AUTH,
+         json_data={
+             "procedures": [{"modality": "CT", "procedure_code": f"P-{i:03}",
+                              "procedure_name": f"Proc {i}"} for i in range(21)],
+             "patient_national_id": "3273010101900001",
+             "patient_name": "Overflow Patient"
+         },
+         expect=400, allow_fail=True)
+
+    test("POST /api/accessions/batch duplicate procedure_code (-> 400)", "POST",
+         f"{WORKER_URL}/api/accessions/batch",
+         headers=AUTH,
+         json_data={
+             "procedures": [
+                 {"modality": "CT", "procedure_code": "DUPE", "procedure_name": "A"},
+                 {"modality": "MR", "procedure_code": "DUPE", "procedure_name": "B"}
+             ],
+             "patient_national_id": "3273010101900001",
+             "patient_name": "Dupe Patient"
+         },
+         expect=400, allow_fail=True)
+
+    test("POST /api/accessions invalid idempotency key (-> 400)", "POST",
+         f"{WORKER_URL}/api/accessions",
+         headers={**AUTH, "X-Idempotency-Key": "not-a-uuid!!!"},
+         json_data={"modality": "CT", "patient": {"national_id": "3273010101900001"}},
+         expect=400, allow_fail=True)
+
+# ==============================================================================
+# SECTION 8 -- Header Plumbing  (direct worker)
+# ==============================================================================
+
+if not CF_REACHABLE:
+    skip_section(8, "HEADER PLUMBING  [worker]  X-Request-ID echo, X-D1-Replica")
+else:
+    section("8. HEADER PLUMBING  [worker]  X-Request-ID echo, X-D1-Replica")
+
+    probe_id = str(uuid.uuid4())
+    ok, p = test("GET /api/accessions (header probe)", "GET",
+                 f"{WORKER_URL}/api/accessions",
+                 headers={**AUTH, "X-Request-ID": probe_id},
+                 expect=200)
+    if ok and p:
+        note(f"X-Request-ID echoed={p.headers.get('X-Request-ID','') == probe_id}  "
+             f"X-D1-Replica={p.headers.get('X-D1-Replica','?')}")
+
+# ==============================================================================
+# SECTION 9 -- Admin Jobs  (direct worker, needs admin role)
+# ==============================================================================
+
+if not CF_REACHABLE:
+    skip_section(9, "ADMIN JOBS  [worker] /admin/run-job  (needs admin role in JWT)")
+else:
+    section("9. ADMIN JOBS  [worker] /admin/run-job  (needs admin role in JWT)")
+
+    test("POST /admin/run-job/idempotency_cleanup", "POST",
+         f"{WORKER_URL}/admin/run-job/idempotency_cleanup",
+         headers=AUTH, expect=200, allow_fail=True)
+
+    test("POST /admin/run-job/soft_delete_purge", "POST",
+         f"{WORKER_URL}/admin/run-job/soft_delete_purge",
+         headers=AUTH, expect=200, allow_fail=True)
+
+    test("POST /admin/run-job/unknown (-> 400)", "POST",
+         f"{WORKER_URL}/admin/run-job/unknown",
+         headers=AUTH, expect=400, allow_fail=True)
+
+# ==============================================================================
+# SECTION 10 -- Via Cloudflare Pages proxy  (--pages flag)
+# ==============================================================================
+
+if not CF_REACHABLE:
+    section("10. VIA CLOUDFLARE PAGES  (skipped -- Cloudflare unreachable from this network)")
+    note(f"When enabled, tests: browser -> {CF_ACCESSION} -> service binding -> worker")
+elif args.pages:
+    section("10. VIA CLOUDFLARE PAGES  [pages] /accession-api/* -> service binding -> worker")
+    note(f"Target: {CF_ACCESSION}")
+
+    ok, pages_resp = test("POST /backend-api/auth/login (via CF Pages)", "POST",
+                          f"{CF_PAGES_API}/auth/login",
+                          json_data={"username": LOGIN_USER, "password": LOGIN_PASS},
+                          expect=200, allow_fail=True)
+    pages_token = ""
+    if ok and pages_resp:
+        pages_token = pages_resp.json().get("access_token", "")
+        note(f"CF Pages token: {pages_token[:20]}...")
+
+    pages_auth = {"Authorization": f"Bearer {pages_token or TOKEN}",
+                  "Content-Type": "application/json"}
+
+    test("GET /accession-api/healthz (via Pages)", "GET",
+         f"{CF_ACCESSION}/healthz", expect=200, allow_fail=True)
+
+    test("GET /accession-api/readyz (via Pages)", "GET",
+         f"{CF_ACCESSION}/readyz", expect=200, allow_fail=True)
+
+    test("GET /accession-api/api/accessions (via Pages)", "GET",
+         f"{CF_ACCESSION}/api/accessions",
+         headers=pages_auth, expect=200, allow_fail=True)
+
+    ok, pages_cr = test("POST /accession-api/api/accessions (via Pages, 201)", "POST",
+                        f"{CF_ACCESSION}/api/accessions",
+                        headers={**pages_auth, "X-Request-ID": str(uuid.uuid4())},
+                        json_data={"modality": "MG",
+                                   "patient": {"national_id": "3273010101900099",
+                                               "name": "Pages Test Patient"}},
+                        expect=201, allow_fail=True)
+    if ok and pages_cr:
+        note(f"Via Pages: acsn={pages_cr.json().get('accession_number')}")
+else:
+    section("10. VIA CLOUDFLARE PAGES  (skipped -- run with --pages to enable)")
+    note(f"When enabled, tests: browser -> {CF_ACCESSION} -> service binding -> worker")
+
+# ==============================================================================
+# SECTION 11 -- Docker Backend Regression  (ensure existing services still work)
+# ==============================================================================
+
+section("11. DOCKER BACKEND REGRESSION  [docker] all existing routes intact")
+note("Verify existing services are not broken by any gateway changes")
+
+test("GET /patients",            "GET", f"{DOCKER_API}/patients",            headers=AUTH)
+test("GET /doctors",             "GET", f"{DOCKER_API}/doctors",             headers=AUTH)
+test("GET /procedures",          "GET", f"{DOCKER_API}/procedures",          headers=AUTH)
+test("GET /procedure-mappings",  "GET", f"{DOCKER_API}/procedure-mappings",  headers=AUTH)
+test("GET /nurses",              "GET", f"{DOCKER_API}/nurses",              headers=AUTH)
+test("GET /settings",            "GET", f"{DOCKER_API}/settings",            headers=AUTH)
+test("GET /orders",              "GET", f"{DOCKER_API}/orders",              headers=AUTH)
+test("GET /api/studies",         "GET", f"{DOCKER_API}/api/studies",         headers=AUTH)
+test("GET /auth/users",          "GET", f"{DOCKER_API}/auth/users",          headers=AUTH)
+test("GET /api/audit/logs",      "GET", f"{DOCKER_API}/api/audit/logs",      headers=AUTH)
+test("GET /simrs-universal/health", "GET", f"{DOCKER_API}/simrs-universal/health", headers=AUTH)
+test("GET /khanza/health",       "GET", f"{DOCKER_API}/khanza/health",       headers=AUTH)
+test("GET /api/products",        "GET", f"{DOCKER_API}/api/products",        headers=AUTH)
+test("GET /api/subscriptions",   "GET", f"{DOCKER_API}/api/subscriptions",   headers=AUTH)
+test("GET /worklists/summary",   "GET", f"{DOCKER_API}/worklists/summary",   headers=AUTH)
 test("GET /api/monitor/satusehat/orders", "GET",
-     f"{BACKEND_API}/api/monitor/satusehat/orders", headers=AUTH, allow_fail=True)
+     f"{DOCKER_API}/api/monitor/satusehat/orders", headers=AUTH, allow_fail=True)
 
-# ══════════════════════════════════════════════════════════════════════════════
-# 12. END-TO-END SIMULATED ORDER FLOW
-# ══════════════════════════════════════════════════════════════════════════════
+for svc in ["auth", "pacs", "master", "order", "mwl", "simrs"]:
+    test(f"Health hub: {svc}", "GET", f"{DOCKER_API}/health/{svc}")
 
-section("12. END-TO-END ORDER FLOW SIMULATION")
-note("Mimics: user logs in → loads OrderForm → picks modality → generates accession → submits order")
+# WADO-RS spot check
+ok, sl = test("GET /api/studies", "GET", f"{DOCKER_API}/api/studies", headers=AUTH)
+if ok and sl:
+    items = sl.json()
+    if isinstance(items, dict):
+        items = items.get("data") or items.get("studies") or items.get("items") or []
+    if isinstance(items, list) and items:
+        s = items[0]
+        suid = s.get("study_instance_uid", "")
+        if suid:
+            test("WADO metadata spot-check", "GET",
+                 f"{DOCKER_BASE}/wado-rs/studies/{suid}/metadata",
+                 headers=AUTH, allow_fail=True)
 
-# Step 1: Fetch procedures (OrderForm procedure picker)
-ok, proc_resp = test("Step 1: GET /procedures (populate form)", "GET",
-                     f"{BACKEND_API}/procedures", headers=AUTH)
-proc_code = None
-proc_name = None
-proc_modality = "CT"
+# ==============================================================================
+# SECTION 12 -- End-to-End Order Flow  (Docker + direct worker)
+# ==============================================================================
+
+section("12. END-TO-END ORDER FLOW  [docker + worker]")
+note("Simulates full user journey: login -> pick procedure -> generate acsn -> submit order")
+
+# Step 1: fetch procedures from Docker backend (OrderForm procedure picker)
+ok, proc_resp = test("Step 1: GET /procedures (Docker, populate OrderForm)", "GET",
+                     f"{DOCKER_API}/procedures", headers=AUTH)
+proc_code, proc_name, proc_modality = "CT-CHEST-E2E", "CT Thorax E2E", "CT"
 if ok and proc_resp:
     procs = proc_resp.json()
     if isinstance(procs, dict):
         procs = procs.get("data") or procs.get("items") or procs.get("procedures") or []
     if isinstance(procs, list) and procs:
         p = procs[0]
-        proc_code     = p.get("procedure_code") or p.get("code") or "CT-CHEST-E2E"
-        proc_name     = p.get("procedure_name") or p.get("name") or "CT Thorax E2E"
-        proc_modality = p.get("modality") or "CT"
-        note(f"Using procedure: code={proc_code}  name={proc_name}  modality={proc_modality}")
+        proc_code     = p.get("procedure_code") or p.get("code") or proc_code
+        proc_name     = p.get("procedure_name") or p.get("name") or proc_name
+        proc_modality = p.get("modality") or proc_modality
+        note(f"Using: code={proc_code}  name={proc_name}  modality={proc_modality}")
 
-# Step 2: Generate accession (getAccessionNumber → accessionServiceClient → gateway → worker)
-e2e_req_id = str(uuid.uuid4())
-ok, acc_resp = test("Step 2: POST /api/accessions (generate accession for order)", "POST",
-                    f"{ACCESSION_API}/api/accessions",
-                    headers={**AUTH, "X-Request-ID": e2e_req_id},
-                    json_data={
-                        "modality": proc_modality,
-                        "patient": {
-                            "id": "MRN-E2E-001",
-                            "national_id": "3273010101900010",
-                            "name": "End-to-End Test Patient"
+if not CF_REACHABLE:
+    note("Step 2-4: SKIPPED -- Cloudflare unreachable from this network")
+    note("         Steps 2 and 4 require direct worker access to generate and verify accession.")
+else:
+    # Step 2: generate accession via worker (getAccessionNumber in accessionServiceClient.js)
+    ok, acc_resp = test("Step 2: POST /api/accessions (worker, generate acsn)", "POST",
+                        f"{WORKER_URL}/api/accessions",
+                        headers={**AUTH, "X-Request-ID": str(uuid.uuid4())},
+                        json_data={
+                            "modality": proc_modality,
+                            "patient": {
+                                "id": "MRN-E2E-001",
+                                "national_id": "3273010101900010",
+                                "name": "E2E Test Patient"
+                            },
+                            "procedure_code": proc_code,
+                            "procedure_name": proc_name
                         },
-                        "procedure_code": proc_code,
-                        "procedure_name": proc_name
-                    },
-                    expect_status=201)
+                        expect=201)
 
-e2e_accession = None
-if ok and acc_resp:
-    e2e_accession = acc_resp.json().get("accession_number")
-    note(f"Step 2 result: accession_number={e2e_accession}")
+    e2e_acsn = None
+    if ok and acc_resp:
+        e2e_acsn = acc_resp.json().get("accession_number")
+        note(f"Step 2: accession_number={e2e_acsn}")
 
-# Step 3: Submit order (order-management service)
-if e2e_accession:
-    ok, order_resp = test("Step 3: POST /orders (submit order with accession)", "POST",
-                          f"{BACKEND_API}/orders",
-                          headers=AUTH,
-                          json_data={
-                              "patient_name": "End-to-End Test Patient",
-                              "mrn": "MRN-E2E-001",
-                              "status": "created",
-                              "priority": "routine",
-                              "procedures": [{
-                                  "procedure_code":  proc_code or "CT-CHEST-E2E",
-                                  "procedure_name":  proc_name or "CT Thorax E2E",
-                                  "modality":        proc_modality,
-                                  "accession_number": e2e_accession
-                              }]
-                          },
-                          expect_status=201, allow_fail=True)
-    if ok and order_resp:
-        order_id = order_resp.json().get("id") or order_resp.json().get("order_id")
-        note(f"Step 3 result: order_id={order_id}")
-    else:
-        note("Step 3 skipped/failed — order-management may require additional fields")
+    # Step 3: submit order to Docker backend (order-management service)
+    if e2e_acsn:
+        ok, order_resp = test("Step 3: POST /orders (Docker, submit order with acsn)", "POST",
+                              f"{DOCKER_API}/orders",
+                              headers=AUTH,
+                              json_data={
+                                  "patient_name": "E2E Test Patient",
+                                  "mrn": "MRN-E2E-001",
+                                  "status": "created",
+                                  "priority": "routine",
+                                  "procedures": [{
+                                      "procedure_code": proc_code,
+                                      "procedure_name": proc_name,
+                                      "modality": proc_modality,
+                                      "accession_number": e2e_acsn
+                                  }]
+                              },
+                              expect=201, allow_fail=True)
+        if ok and order_resp:
+            oid = order_resp.json().get("id") or order_resp.json().get("order_id")
+            note(f"Step 3: order_id={oid}")
+        else:
+            note("Step 3: WARN -- order-management may need additional required fields")
 
-# Step 4: Verify accession record persisted correctly
-if e2e_accession:
-    ok, verify = test("Step 4: GET /api/accessions/:num (verify persisted)", "GET",
-                      f"{ACCESSION_API}/api/accessions/{requests.utils.quote(e2e_accession, safe='')}",
-                      headers=AUTH, expect_status=200)
-    if ok and verify:
-        rec = verify.json()
-        note(f"Step 4 result: modality={rec.get('modality')}  "
-             f"patient_name={rec.get('patient_name')}  "
-             f"source={rec.get('source')}")
+    # Step 4: verify accession record persisted in worker D1
+    if e2e_acsn:
+        enc = requests.utils.quote(e2e_acsn, safe='')
+        ok, verify = test("Step 4: GET /api/accessions/:num (worker, verify D1 persist)", "GET",
+                          f"{WORKER_URL}/api/accessions/{enc}",
+                          headers=AUTH, expect=200)
+        if ok and verify:
+            rec = verify.json()
+            note(f"Step 4: modality={rec.get('modality')}  "
+                 f"patient={rec.get('patient_name')}  source={rec.get('source')}")
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ==============================================================================
 # SUMMARY
-# ══════════════════════════════════════════════════════════════════════════════
+# ==============================================================================
 
 print()
 print("=" * 110)
-total = PASS_COUNT + FAIL_COUNT
-log(f"  RESULT  |  {PASS_COUNT}/{total} passed  |  {FAIL_COUNT} failed  "
-    f"|  Warnings (allow_fail) not counted",
-    C.BOLD + (C.GREEN if FAIL_COUNT == 0 else C.RED))
-log(f"  Chain tested: Browser → Nginx({FRONTEND_PROXY})"
-    f" → api-gateway-v2 → accession-worker (D1 + DO)", C.DIM)
-log(f"  Completed: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}", C.DIM)
+total = PASS + FAIL
+log(f"  RESULT : {PASS}/{total} passed | {FAIL} failed | WARN (allow_fail) not counted",
+    C.BOLD + (C.GREEN if FAIL == 0 else C.RED))
+log(f"  Layers : [docker] {DOCKER_API}", C.DIM)
+log(f"           [worker] {WORKER_URL}  "
+    f"({'tested' if CF_REACHABLE else 'unreachable -- skipped sections 2-9,12'})", C.DIM)
+log(f"           [pages]  {CF_ACCESSION}  ({'tested' if args.pages and CF_REACHABLE else 'skipped, use --pages'})", C.DIM)
+log(f"  Done   : {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}", C.DIM)
 print("=" * 110)
 
-if FAIL_COUNT > 0:
-    sys.exit(1)
+sys.exit(0 if FAIL == 0 else 1)
