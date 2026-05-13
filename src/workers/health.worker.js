@@ -1,10 +1,13 @@
 /**
- * Health Monitor Web Worker - v2.0
+ * Health Monitor Web Worker - v2.1
  * Berjalan di background untuk memantau kesehatan semua microservices.
+ * Added: Consecutive failure tracking for degraded-service warnings.
  */
 
 const healthCache = new Map();
 const CACHE_TTL = 30000; // Cache 30 detik
+const DEGRADED_THRESHOLD = 3; // After 3 consecutive failures, mark as degraded
+const consecutiveFailures = new Map(); // { moduleName: number }
 let intervalId = null;
 let currentRegistry = {};
 
@@ -74,6 +77,19 @@ async function checkAll(registry) {
       }
 
       const status = await fetchHealth(fullUrl, name);
+      
+      // Track consecutive failures for degraded-service detection
+      if (status.healthy) {
+        consecutiveFailures.set(name, 0);
+        status.degraded = false;
+      } else {
+        const prevCount = consecutiveFailures.get(name) || 0;
+        const newCount = prevCount + 1;
+        consecutiveFailures.set(name, newCount);
+        status.degraded = newCount >= DEGRADED_THRESHOLD;
+        status.consecutiveFailures = newCount;
+      }
+      
       results[name] = status;
       healthCache.set(fullUrl, { data: status, timestamp: Date.now() });
     });

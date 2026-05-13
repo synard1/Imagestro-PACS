@@ -19,9 +19,10 @@
  */
 
 const BACKEND_URL = 'https://dev-pacs-backend.satupintudigital.co.id';
+const ACCESSION_WORKER_URL = 'https://accession-worker.satupintudigital.workers.dev';
 
 // Paths that should be proxied to backend
-const PROXY_PATHS = ['/backend-api/', '/api/', '/wado-rs/'];
+const PROXY_PATHS = ['/backend-api/', '/api/', '/wado-rs/', '/accession-api/'];
 
 // Headers to forward from client to backend
 const FORWARD_HEADERS = [
@@ -62,6 +63,11 @@ export default {
     // Handle CORS preflight (OPTIONS)
     if (request.method === 'OPTIONS') {
       return handlePreflight(request);
+    }
+
+    // Route /accession-api/* to the accession worker
+    if (url.pathname.startsWith('/accession-api/')) {
+      return proxyToAccessionWorker(request, env, url);
     }
 
     try {
@@ -144,6 +150,117 @@ export default {
 };
 
 /**
+ * Compute HMAC-SHA256 signature using Web Crypto API.
+ * @param {string} data - The data to sign
+ * @param {string} secret - The secret key
+ * @returns {Promise<string>} Hex-encoded HMAC signature
+ */
+async function computeHMAC(data, secret) {
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(data));
+  return Array.from(new Uint8Array(signature))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+/**
+ * Proxy requests to the Accession Worker
+ * Strips /accession-api prefix, preserves remaining path + query string + HTTP method.
+ * Uses Service Binding (env.ACCESSION_WORKER) when available, falls back to HTTP URL.
+ * Returns HTTP 502 JSON error on connection failure or 30-second timeout.
+ */
+async function proxyToAccessionWorker(request, env, url) {
+  // Strip /accession-api prefix, preserve remaining path and query string
+  const targetPath = url.pathname.replace('/accession-api', '') + url.search;
+
+  // Build headers to forward (selective: only Authorization, Content-Type, X-Request-ID)
+  const headers = new Headers();
+  const forwardHeaders = ['authorization', 'content-type', 'x-request-id'];
+  forwardHeaders.forEach(h => {
+    const value = request.headers.get(h);
+    if (value) headers.set(h, value);
+  });
+
+  // Propagate X-Tenant-ID (from incoming request or empty string)
+  const tenantId = request.headers.get('x-tenant-id') || '';
+  headers.set('X-Tenant-ID', tenantId);
+
+  // Compute HMAC-SHA256 signature over X-Tenant-ID + X-Request-ID
+  const requestId = request.headers.get('x-request-id') || '';
+  const signature = await computeHMAC(tenantId + requestId, env.GATEWAY_SHARED_SECRET);
+  headers.set('X-Gateway-Signature', signature);
+
+  // Forward request body for POST, PUT, PATCH, DELETE methods
+  const body = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)
+    ? request.body
+    : null;
+
+  try {
+    let response;
+
+    if (env && env.ACCESSION_WORKER) {
+      // Use Service Binding (direct worker-to-worker invocation)
+      response = await env.ACCESSION_WORKER.fetch(
+        new Request(`https://accession-worker${targetPath}`, {
+          method: request.method,
+          headers,
+          body,
+        }),
+        { signal: AbortSignal.timeout(30000) }
+      );
+    } else {
+      // Fall back to HTTP URL
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+      try {
+        response = await fetch(`${ACCESSION_WORKER_URL}${targetPath}`, {
+          method: request.method,
+          headers,
+          body,
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    }
+
+    // Forward response with CORS headers
+    const responseHeaders = new Headers();
+    responseHeaders.set('Content-Type', response.headers.get('content-type') || 'application/json');
+    responseHeaders.set('Access-Control-Allow-Origin', url.origin);
+    responseHeaders.set('Access-Control-Allow-Credentials', 'true');
+
+    return new Response(response.body, {
+      status: response.status,
+      headers: responseHeaders,
+    });
+  } catch (error) {
+    return new Response(JSON.stringify({
+      error: 'Bad Gateway',
+      path: url.pathname,
+      message: error.name === 'AbortError' || error.name === 'TimeoutError'
+        ? 'Request to accession worker timed out after 30 seconds'
+        : error.message || 'Failed to connect to accession worker',
+    }), {
+      status: 502,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': url.origin,
+        'Access-Control-Allow-Credentials': 'true',
+      },
+    });
+  }
+}
+
+/**
  * Handle CORS preflight OPTIONS requests
  */
 function handlePreflight(request) {
@@ -154,7 +271,7 @@ function handlePreflight(request) {
     headers: {
       'Access-Control-Allow-Origin': url.origin,
       'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, PATCH, OPTIONS',
-      'Access-Control-Allow-Headers': 'Authorization, Content-Type, Cookie, X-CSRF-Token, X-Requested-With, Accept, Accept-Language, Cache-Control',
+      'Access-Control-Allow-Headers': 'Authorization, Content-Type, Cookie, X-CSRF-Token, X-Requested-With, Accept, Accept-Language, Cache-Control, X-Request-ID',
       'Access-Control-Allow-Credentials': 'true',
       'Access-Control-Max-Age': '86400', // 24 hours
       'Vary': 'Origin'

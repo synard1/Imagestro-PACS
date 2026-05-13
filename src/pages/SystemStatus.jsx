@@ -9,6 +9,7 @@ import { useBackendHealth } from '../hooks/useBackend';
 const StatusCard = ({ name, status }) => {
   const isHealthy = status?.healthy;
   const isLoading = status === undefined;
+  const isDegraded = status?.degraded;
   
   // Ambil detail dari data asli backend
   const detail = status?.data || {};
@@ -17,21 +18,29 @@ const StatusCard = ({ name, status }) => {
 
   return (
     <div className={`bg-white rounded-2xl border p-5 flex flex-col h-full transition-all duration-500 ${
-      isHealthy ? 'border-slate-200 shadow-sm hover:shadow-md' : 'border-rose-200 shadow-sm bg-rose-50/30'
+      isHealthy ? 'border-slate-200 shadow-sm hover:shadow-md' : 
+      isDegraded ? 'border-amber-300 shadow-sm bg-amber-50/30' :
+      'border-rose-200 shadow-sm bg-rose-50/30'
     }`}>
       <div className="flex justify-between items-start mb-4">
         <div className={`p-2.5 rounded-xl ${
           isLoading ? 'bg-slate-100 text-slate-400 animate-pulse' :
-          isHealthy ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'
+          isHealthy ? 'bg-emerald-50 text-emerald-600' : 
+          isDegraded ? 'bg-amber-50 text-amber-600' :
+          'bg-rose-50 text-rose-600'
         }`}>
           {isLoading ? <Zap size={20} className="animate-spin" /> : 
-           isHealthy ? <CheckCircle size={20} /> : <XCircle size={20} />}
+           isHealthy ? <CheckCircle size={20} /> : 
+           isDegraded ? <AlertCircle size={20} /> :
+           <XCircle size={20} />}
         </div>
         <div className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
           isLoading ? 'bg-slate-100 text-slate-500' :
-          isHealthy ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
+          isHealthy ? 'bg-emerald-100 text-emerald-700' : 
+          isDegraded ? 'bg-amber-100 text-amber-700' :
+          'bg-rose-100 text-rose-700'
         }`}>
-          {isLoading ? 'Scanning' : isHealthy ? 'Online' : 'Offline'}
+          {isLoading ? 'Scanning' : isHealthy ? 'Online' : isDegraded ? 'Degraded' : 'Offline'}
         </div>
       </div>
       
@@ -40,6 +49,15 @@ const StatusCard = ({ name, status }) => {
         <Terminal size={10} />
         {status?.url ? new URL(status.url).pathname : '---'}
       </div>
+
+      {isDegraded && (
+        <div className="mt-2 mb-4 p-2 bg-amber-50 rounded-lg border border-amber-200">
+          <p className="text-[10px] text-amber-700 font-medium leading-tight flex items-center gap-1">
+            <AlertCircle size={10} />
+            Degraded service — {status.consecutiveFailures} consecutive failures
+          </p>
+        </div>
+      )}
 
       {isHealthy && (
         <div className="space-y-2 mb-4">
@@ -54,7 +72,7 @@ const StatusCard = ({ name, status }) => {
         </div>
       )}
 
-      {status?.error && (
+      {status?.error && !isDegraded && (
         <div className="mt-2 p-2 bg-rose-50 rounded-lg border border-rose-100">
            <p className="text-[10px] text-rose-600 font-medium leading-tight break-words">
              Error: {status.error}
@@ -101,7 +119,7 @@ const SystemStatus = () => {
 
   const categories = {
     'Clinical Core': ['patients', 'procedures', 'doctors', 'orders', 'worklist'],
-    'System Engines': ['auth', 'pacs', 'modalities', 'dicom_nodes', 'mwl_writer'],
+    'System Engines': ['auth', 'pacs', 'modalities', 'dicom_nodes', 'mwl_writer', 'accession'],
     'Compliance & Audit': ['audit', 'auth_audit', 'storage_config', 'settings'],
     'External Bridges': ['khanza', 'satusehatMonitor', 'simrs_universal']
   };
@@ -110,6 +128,11 @@ const SystemStatus = () => {
   const total = statusValues.length || 1;
   const healthy = statusValues.filter(s => s.healthy).length;
   const uptime = Math.round((healthy / total) * 100);
+  
+  // Identify degraded services (3+ consecutive failures)
+  const degradedServices = Object.entries(status || {})
+    .filter(([_, s]) => s?.degraded)
+    .map(([name]) => name);
 
   return (
     <div className="flex-1 overflow-auto bg-slate-50 p-4 md:p-8">
@@ -173,6 +196,22 @@ const SystemStatus = () => {
             <div className="w-12 h-12 rounded-full border-4 border-emerald-500 border-t-transparent animate-spin"></div>
           </div>
         </div>
+
+        {/* Degraded Service Warning */}
+        {degradedServices.length > 0 && (
+          <div className="mb-8 p-5 rounded-2xl border-2 border-amber-300 bg-amber-50 flex items-center gap-4">
+            <div className="p-3 rounded-xl bg-amber-100 text-amber-600">
+              <AlertCircle size={24} />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-amber-800 font-bold text-sm">Degraded Service Warning</h3>
+              <p className="text-amber-700 text-xs mt-0.5">
+                The following services have failed 3+ consecutive health checks: {' '}
+                <span className="font-bold">{degradedServices.map(s => s.replace(/_/g, ' ')).join(', ')}</span>
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Grid Sections */}
         <div className="space-y-12">

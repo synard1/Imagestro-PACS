@@ -29,6 +29,7 @@
     "@cornerstonejs/tools": "^1.80.4",
     "@headlessui/react": "^2.2.9",
     "@heroicons/react": "^2.2.0",
+    "@marsidev/react-turnstile": "^1.5.2",
     "@tanstack/react-table": "^8.21.3",
     "@tiptap/extension-color": "^3.10.7",
     "@tiptap/extension-text-align": "^3.10.7",
@@ -93,6 +94,7 @@
     "vite": "^5.4.10",
     "vite-plugin-pwa": "^1.2.0",
     "vitest": "^4.0.15",
-    "workbox-window": "^7.4.0"
+    "workbox-window": "^7.4.0",
+    "wrangler": "^4.90.1"
   }
 }

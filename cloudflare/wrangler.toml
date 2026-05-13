@@ -1,34 +1,29 @@
 name = "imagestro-pacs-proxy"
 main = "worker.js"
-compatibility_date = "2024-01-01"
+compatibility_date = "2026-05-12"
+compatibility_flags = ["nodejs_compat"]
+
+# Service Binding to Accession Worker (zero-latency worker-to-worker)
+[[services]]
+binding = "ACCESSION_WORKER"
+service = "accession-worker"
 
 # Routes - bind this worker to specific paths on your Pages domain
-# IMPORTANT: Routes require zone_id or zone_name to work
-# For now, configure routes manually in Cloudflare Dashboard:
-# Workers & Pages → imagestro-pacs-proxy → Settings → Triggers → Routes
-
-# Worker will handle:
+# Worker handles:
 # - imagestro-pacs.pages.dev/backend-api/*
 # - imagestro-pacs.pages.dev/api/*
 # - imagestro-pacs.pages.dev/wado-rs/*
+# - imagestro-pacs.pages.dev/accession-api/*
 
-# Note: Routes in wrangler.toml require zone_id which we don't have yet
-# Alternative: Use Cloudflare Dashboard to add routes manually
+# Environment variables
+[vars]
+BACKEND_URL = "https://dev-pacs-backend.satupintudigital.co.id"
+ACCESSION_WORKER_URL = "https://accession-worker.satupintudigital.workers.dev"
 
-# Environment variables (optional - currently hardcoded in worker.js)
-# [vars]
-# BACKEND_URL = "https://dev-pacs-backend.satupintudigital.co.id"
-
-# Development settings
-[env.development]
-name = "imagestro-pacs-proxy-dev"
-
-# Production settings
-[env.production]
-name = "imagestro-pacs-proxy"
+# GATEWAY_SHARED_SECRET is set via `wrangler secret put GATEWAY_SHARED_SECRET`
 
 [observability]
-enabled = false
+enabled = true
 head_sampling_rate = 1
 
 [observability.logs]
@@ -36,9 +31,4 @@ enabled = true
 head_sampling_rate = 1
 persist = true
 invocation_logs = true
-
-[observability.traces]
-enabled = false
-persist = true
-head_sampling_rate = 1
 

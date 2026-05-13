@@ -20,6 +20,8 @@ export default defineConfig({
       'tests/**/*.test.jsx',
       'tests/**/*.property.test.js',
       'tests/**/*.spec.js',
+      'src/services/__tests__/**/*.test.js',
+      'src/services/__tests__/**/*.property.test.js',
       'mobile-app/src/**/*.test.jsx', // Include mobile-app component tests
     ],
     exclude: [
