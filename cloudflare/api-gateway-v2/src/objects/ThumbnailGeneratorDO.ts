@@ -80,7 +80,7 @@ export class ThumbnailGeneratorSQLite extends DurableObject<Bindings> {
       const state = await this.getState(cacheKey);
       
       if (state?.status === 'complete' && state.r2_key) {
-        const object = await this.env.THUMBNAIL_CACHE_R2.get(state.r2_key);
+        const object = await this.env.IMAGE_CACHE_R2.get(state.r2_key);
         if (object) {
           const contentType = path.endsWith('original') ? 'application/dicom' : 'image/jpeg';
           return new Response(object.body, { 
@@ -93,8 +93,12 @@ export class ThumbnailGeneratorSQLite extends DurableObject<Bindings> {
         }
       }
       
-      if (state?.status === 'generating') {
-        return new Response("Generating...", { status: 202, headers: { 'Retry-After': '2' } });
+      // Staleness check: If generating for more than 5 minutes, allow retry
+      const isStale = state?.status === 'generating' && 
+                      (Date.now() - new Date(state.last_updated).getTime() > 300000);
+
+      if (state?.status === 'generating' && !isStale) {
+        return new Response("Generating...", { status: 202, headers: { 'Retry-After': '5' } });
       }
       
       await this.setState(cacheKey, { status: 'generating' });
@@ -121,7 +125,7 @@ export class ThumbnailGeneratorSQLite extends DurableObject<Bindings> {
         const imageBody = await pacsResponse.arrayBuffer();
         const contentType = pacsResponse.headers.get('content-type') || (path.endsWith('original') ? 'application/dicom' : 'image/jpeg');
 
-        await this.env.THUMBNAIL_CACHE_R2.put(r2Key, imageBody, { 
+        await this.env.IMAGE_CACHE_R2.put(r2Key, imageBody, { 
           httpMetadata: { contentType } 
         });
         

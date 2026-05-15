@@ -15,8 +15,8 @@ SIMRS_UNIVERSAL_URL = "http://simrs-universal-api:8005"
 SATUSEHAT_INTEGRATOR_URL = "http://satusehat-integrator:8081"
 
 [[r2_buckets]]
-binding = "THUMBNAIL_CACHE_R2"
-bucket_name = "imagestro-thumbnails"
+binding = "IMAGE_CACHE_R2"
+bucket_name = "imagestro-cache"
 
 [[kv_namespaces]]
 binding = "API_CACHE"

@@ -18,7 +18,7 @@ export type Bindings = {
   
   // Bindings
   API_CACHE: KVNamespace;
-  THUMBNAIL_CACHE_R2: R2Bucket;
+  IMAGE_CACHE_R2: R2Bucket;
   BACKBONE: Fetcher;
   
   // Service Bindings
