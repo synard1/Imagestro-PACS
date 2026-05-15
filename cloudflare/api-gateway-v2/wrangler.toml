@@ -1,0 +1,58 @@
+name = "api-gateway-v2"
+main = "src/index.ts"
+compatibility_date = "2026-05-15"
+compatibility_flags = [ "nodejs_compat" ]
+
+[vars]
+ALLOWED_ORIGINS = "http://localhost:5173,http://localhost:3000,https://imagestro-pacs.pages.dev,https://mwl.satupintudigital.co.id"
+JWT_ALGORITHM = "HS256"
+AUTH_SERVICE_URL = "http://auth-service:5000"
+PACS_SERVICE_URL = "http://pacs-service:8003"
+MASTER_DATA_SERVICE_URL = "http://master-data-service:8002"
+ORDER_SERVICE_URL = "http://order-management:8001"
+MWL_SERVICE_URL = "http://mwl-writer-secured:8000"
+SIMRS_UNIVERSAL_URL = "http://simrs-universal-api:8005"
+SATUSEHAT_INTEGRATOR_URL = "http://satusehat-integrator:8081"
+
+[[r2_buckets]]
+binding = "THUMBNAIL_CACHE_R2"
+bucket_name = "imagestro-thumbnails"
+
+[[kv_namespaces]]
+binding = "API_CACHE"
+id = "19df22b7c1764cb7b091e2ed929df9b4"
+
+[[vpc_networks]]
+binding = "BACKBONE"
+tunnel_id = "5c496701-6046-410a-a870-f20f096c65e4"
+
+[[services]]
+binding = "ACCESSION_WORKER"
+service = "accession-worker"
+[[services]]
+binding = "MASTER_DATA_WORKER"
+service = "master-data-worker"
+[[services]]
+binding = "AUTH_WORKER"
+service = "auth-worker"
+
+[[durable_objects.bindings]]
+name = "HEALTH_DO"
+class_name = "InfrastructureHealthSQLite"
+[[durable_objects.bindings]]
+name = "THUMBNAIL_DO"
+class_name = "ThumbnailGeneratorSQLite"
+
+[[migrations]]
+tag = "v_sqlite_final"
+new_sqlite_classes = ["InfrastructureHealthSQLite", "ThumbnailGeneratorSQLite"]
+
+[[unsafe.bindings]]
+type = "ratelimit"
+name = "HEALTH_RATE_LIMITER"
+namespace_id = "1001"
+simple = { limit = 20, period = 60 }
+
+[observability]
+enabled = true
+head_sampling_rate = 1

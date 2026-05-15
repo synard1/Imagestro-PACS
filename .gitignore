@@ -1,39 +1,113 @@
-﻿# Dependencies
+# Whitelist approach: ignore everything by default
+*
+
+# Whitelist core folders and their contents
+!src/
+!src/**
+!pacs-service/
+!pacs-service/**
+!api-gateway/
+!api-gateway/**
+!order-management/
+!order-management/**
+!auth-service/
+!auth-service/**
+!master-data-service/
+!master-data-service/**
+!satusehat-integrator/
+!satusehat-integrator/**
+!test_radiology_status.py
+!mobile-app/
+!mobile-app/**
+!cloudflare/
+!cloudflare/**
+!@docs/
+!@docs/**
+!docs/
+!docs/**
+!tests/
+!tests/**
+!mobile-appv2/
+!mobile-appv2/**
+!mobile-service/
+!mobile-service/**
+
+# Whitelist core configuration files
+!.gitignore
+!.github/
+!.github/workflows/
+!.github/workflows/**
+!package.json
+!package-lock.json
+!docker-compose.yml
+!nginx-frontend.conf
+!.env.example
+!vite.config.js
+!vitest.config.js
+!tests/
+!tests/setup.js
+!tests/ci/
+!tests/ci/**
+!public/sw.js
+!public/_redirects
+
+# Whitelist documentation
+!docs/
+!docs/**
+!@docs/
+!@docs/**
+
+# ==========================================
+# GLOBAL IGNORE PATTERNS (Backups, Junk, OS)
+# ==========================================
+
 node_modules/
+dist/
+build/
+.DS_Store
+*.log
 .venv/
 __pycache__/
 *.pyc
+*.pyo
 
-# Build
-dist/
-build/
+# Backup and Copy patterns
+**/*backup*
+**/*copy*
+**/*.bak
+**/*.orig
+**/*.tmp
+**/*.temp
+**/*.backup_*
+**/.env.backup.*
+**/docker-compose.yml.backup*
 
-# Environment
-.env
-.env.local
-.env.*.local
-.dev.vars
-!.env.example
+# Build artifacts
+*.tar.gz
+*.zip
 
-# Logs
-*.log
-logs/
-npm-debug.log*
+# Test relocation policy: keep consolidated tests under /tests, ignore test files in legacy source trees
+src/**/*.test.js
+src/**/*.test.jsx
+src/**/*.spec.js
+src/**/__tests__/**
+fullstack-orthanc-dicom/**/*.test.js
+fullstack-orthanc-dicom/**/*.test.jsx
+fullstack-orthanc-dicom/**/*.spec.js
+fullstack-orthanc-dicom/**/test_*.py
+fullstack-orthanc-dicom/**/*_test.py
+fullstack-orthanc-dicom/**/*test.py
+fullstack-orthanc-dicom/**/__tests__/**
 
-# System/IDE
-.DS_Store
+# IDEs
 .vscode/
 .idea/
 .claude/
-.gemini/
-.gemini_security/
-.wt/
-.wrangler/
-**/ .wrangler/
+.kiro/
+.trae/
+.agent/
+# Added by code-review-graph
+.code-review-graph/
 
-# Project Specific
-/data/
-uploads/
-backups_archived/
-tmp/
-.tmp/
+
+mwl-writer-unused/*
