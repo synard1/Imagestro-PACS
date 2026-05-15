@@ -16,7 +16,7 @@ const getWadoBaseUrl = () => {
   let baseUrl = studiesConfig.baseUrl;
 
   if (!baseUrl) {
-    const prefix = apiBaseUrl || \"/backend-api\";
+    const prefix = apiBaseUrl || "/backend-api";
     return `${prefix.replace(/\/$/, '')}/wado-rs`;
   }
 
@@ -33,21 +33,15 @@ const getHeaders = (extraHeaders = {}) => {
 };
 
 export const wadoService = {
-  /**
-   * Get thumbnail URL (Optimized via Cloudflare Durable Object)
-   */
   getThumbnailUrl(studyId, seriesId, instanceId, size = 200) {
     const { apiBaseUrl } = getConfigSync();
-    const prefix = apiBaseUrl || \"\";
+    const prefix = apiBaseUrl || "";
     return `${prefix}/api/studies/${studyId}/series/${seriesId}/instances/${instanceId}/thumbnail?size=${size}`;
   },
 
-  /**
-   * Get rendered image URL (Optimized via Cloudflare Durable Object)
-   */
   getRenderedUrl(studyId, seriesId, instanceId, windowCenter, windowWidth, quality = 90) {
     const { apiBaseUrl } = getConfigSync();
-    const prefix = apiBaseUrl || \"\";
+    const prefix = apiBaseUrl || "";
     let url = `${prefix}/api/studies/${studyId}/series/${seriesId}/instances/${instanceId}/rendered`;
     const params = new URLSearchParams();
 
@@ -59,12 +53,9 @@ export const wadoService = {
     return queryString ? `${url}?${queryString}` : url;
   },
 
-  /**
-   * Get DICOM instance URL (Optimized via Cloudflare Durable Object)
-   */
   getInstanceUrl(studyId, seriesId, instanceId) {
     const { apiBaseUrl } = getConfigSync();
-    const prefix = apiBaseUrl || \"\";
+    const prefix = apiBaseUrl || "";
     return `${prefix}/api/studies/${studyId}/series/${seriesId}/instances/${instanceId}/original`;
   },
 
