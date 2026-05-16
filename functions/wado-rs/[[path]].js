@@ -1,6 +1,5 @@
 /**
- * Cloudflare Pages Function — Proxy /backend-api/* to api-gateway-v2
- * Strips /backend-api prefix before forwarding.
+ * Cloudflare Pages Function — Proxy /wado-rs/* to api-gateway-v2
  */
 const GATEWAY_URL = 'https://api-gateway-v2.xolution.workers.dev';
 
@@ -8,29 +7,25 @@ export async function onRequest(context) {
   const { request } = context;
   const url = new URL(request.url);
 
-  // Handle CORS preflight
   if (request.method === 'OPTIONS') {
     return new Response(null, {
       status: 204,
       headers: {
         'Access-Control-Allow-Origin': url.origin,
         'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, PATCH, OPTIONS',
-        'Access-Control-Allow-Headers': 'Authorization, Content-Type, Cookie, X-CSRF-Token, X-Tenant-ID, X-Hospital-ID, X-Request-ID, Accept',
+        'Access-Control-Allow-Headers': 'Authorization, Content-Type, Cookie, X-Tenant-ID, X-Hospital-ID, Accept',
         'Access-Control-Allow-Credentials': 'true',
         'Access-Control-Max-Age': '86400',
       }
     });
   }
 
-  // Strip /backend-api prefix
-  const backendPath = url.pathname.replace(/^\/backend-api/, '');
-  const gatewayUrl = `${GATEWAY_URL}${backendPath}${url.search}`;
+  const gatewayUrl = `${GATEWAY_URL}${url.pathname}${url.search}`;
 
   const headers = new Headers();
   const forwardHeaders = [
     'authorization', 'content-type', 'cookie', 'accept',
-    'x-tenant-id', 'x-hospital-id', 'x-api-key', 'x-csrf-token',
-    'x-request-id', 'cache-control', 'user-agent'
+    'x-tenant-id', 'x-hospital-id', 'x-api-key', 'x-request-id'
   ];
   for (const h of forwardHeaders) {
     const val = request.headers.get(h);
@@ -60,11 +55,7 @@ export async function onRequest(context) {
       headers: responseHeaders
     });
   } catch (error) {
-    console.error(`[Pages Function /backend-api] Error: ${error.message}`);
-    return new Response(JSON.stringify({ 
-      error: 'Gateway Error', 
-      message: error.message 
-    }), { 
+    return new Response(JSON.stringify({ error: error.message }), { 
       status: 502,
       headers: { 'Content-Type': 'application/json' }
     });
