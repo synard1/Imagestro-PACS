@@ -16,7 +16,7 @@ SATUSEHAT_INTEGRATOR_URL = "http://satusehat-integrator:8081"
 KHANZA_API_URL = "http://khanza-service:3007"
 KHANZA_INTERNAL_KEY = "PLACEHOLDER_KEY"
 # --- Feature Flags ---
-THUMBNAIL_CACHE_ENABLED = "false"  # Set to "true" to enable DO+R2 thumbnail caching
+THUMBNAIL_CACHE_ENABLED = "true"  # Set to "false" to disable DO+R2 thumbnail caching
 # --- Centralized D1 Logging vars ---
 LOG_LEVEL = "info"
 LOG_SAMPLE_RATE = "0.1"

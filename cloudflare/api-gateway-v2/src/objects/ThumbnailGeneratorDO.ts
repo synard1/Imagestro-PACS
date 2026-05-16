@@ -70,8 +70,13 @@ export class ThumbnailGeneratorSQLite extends DurableObject<Bindings> {
       normalizedPath = normalizedPath.replace('/backend-api', '');
     }
     
-    // Generate a unique cache key based on normalized path + params
-    const cacheKey = `${normalizedPath}${search}`;
+    // Generate cache key WITHOUT auth tokens (so cache is shared across users)
+    // Only include non-auth query params in cache key
+    const cacheParams = new URLSearchParams(url.search);
+    cacheParams.delete('token');
+    cacheParams.delete('access_token');
+    const cacheSearch = cacheParams.toString() ? `?${cacheParams.toString()}` : '';
+    const cacheKey = `${normalizedPath}${cacheSearch}`;
     const r2Key = `cache/${cacheKey.replace(/[\/\?&=]/g, '_')}` + (normalizedPath.endsWith('original') ? '.dcm' : '.jpg');
 
     // Capture ALL relevant headers to forward (match proxyRequest logic exactly)
@@ -80,6 +85,12 @@ export class ThumbnailGeneratorSQLite extends DurableObject<Bindings> {
     for (const h of forwardHeaders) {
       const val = request.headers.get(h);
       if (val) headers.set(h, val);
+    }
+
+    // Convert ?token= query param to Authorization header if not already present
+    const tokenParam = url.searchParams.get('token') || url.searchParams.get('access_token');
+    if (tokenParam && !headers.has('authorization')) {
+      headers.set('Authorization', `Bearer ${tokenParam}`);
     }
 
     // Resolve tenant from request headers or search params (Browser fallback)
