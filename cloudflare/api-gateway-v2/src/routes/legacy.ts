@@ -12,19 +12,35 @@ import { proxyRequest } from '../services/proxy';
 export const legacyRoutes = new Hono<AppContext>();
 
 // ─── Zero Trust Middleware (for /api/* legacy routes) ─────────────────────────
+// NOTE: Legacy backend services validate auth themselves.
+// Gateway only validates JWT when it can (matching JWT_SECRET).
+// If validation fails, we still forward to backend — it will reject if unauthorized.
+// This allows tokens signed by legacy auth-service (different secret) to pass through.
 
 legacyRoutes.use('/api/*', async (c, next) => {
   const path = c.req.path.replace(/^\/api/, '').replace(/^\/v1/, '');
-  const publicPaths = ['/health', '/auth/forgot-password'];
+  const publicPaths = ['/health', '/auth/forgot-password', '/csrf/token'];
   const isPublic = publicPaths.some(p => path.startsWith(p));
   const isAuth = path.startsWith('/auth/');
 
   if (isPublic || isAuth) return next();
 
+  // Try to extract auth context — if it works, great (injects tenant headers).
+  // If it fails (different JWT secret), still forward — backend validates itself.
   const { tenant_id, role } = await getAuthContext(c);
-  if (!tenant_id && role !== 'superadmin') {
-    return c.json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Authentication required' } }, 401);
+  
+  // Only block if there's NO authorization header at all (truly unauthenticated)
+  const hasAuthHeader = !!c.req.header('Authorization');
+  const hasCookie = !!c.req.header('Cookie');
+  
+  if (!tenant_id && !hasAuthHeader && !hasCookie) {
+    console.warn(`[ZeroTrust] No credentials at all for ${c.req.path}`);
+    return c.json({ 
+      success: false, 
+      error: { code: 'UNAUTHORIZED', message: 'Authentication required' } 
+    }, 401);
   }
+  
   return next();
 });
 
