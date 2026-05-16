@@ -2,20 +2,21 @@
  * Accession Worker — Hono app entry point.
  *
  * Applies middleware chain in order:
- * request-id → logger → security-headers → body-size-limit → CORS →
+ * request-id → D1 logger → security-headers → body-size-limit → CORS →
  * auth/tenant → rate-limit → shadow-mode → route → error-handler
  *
  * Exports Durable Object classes and scheduled handler.
  *
- * Requirements: 11.1, 11.2, 12.1, 13.8, 13.9, 15.1, 19.1, 19.2
+ * Requirements: 11.1, 11.2, 12.1, 13.8, 13.9, 15.1, 19.1, 19.2, 6.5, 16.4
  */
 
 import { Hono } from 'hono';
 import type { Env, TenantContext } from './types';
+import type { D1Logger } from '../../shared/logger';
 
 // Middleware
 import { requestIdMiddleware } from './middleware/request-id';
-import { loggerMiddleware } from './middleware/logger';
+import { createLoggerMiddleware } from '../../shared/logger-middleware';
 import { securityHeadersMiddleware } from './middleware/security-headers';
 import { bodySizeLimitMiddleware } from './middleware/body-size-limit';
 import { corsMiddleware } from './middleware/cors';
@@ -45,6 +46,7 @@ export { CircuitBreakerDurableObject } from './durable-objects/circuit-breaker-d
 type Variables = {
   tenant: TenantContext;
   requestId: string;
+  logger: D1Logger;
   shadowMode: boolean;
 };
 
@@ -87,8 +89,8 @@ app.onError((err, c) => {
 // 1. Request ID (propagate or generate)
 app.use('*', requestIdMiddleware);
 
-// 3. Logger (structured JSON, skips /healthz and /readyz)
-app.use('*', loggerMiddleware);
+// 2. Logger (D1-backed centralized logger via shared module)
+app.use('*', createLoggerMiddleware('accession-worker') as any);
 
 // 4. Security headers
 app.use('*', securityHeadersMiddleware);

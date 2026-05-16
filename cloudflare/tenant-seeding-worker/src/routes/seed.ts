@@ -15,6 +15,7 @@ import { determineStatus, truncateErrorDetails } from '../utils/status';
 import { AuthClient } from '../services/auth-client';
 import { UserSeeder } from '../services/user-seeder';
 import type { Env, SeedingStatus, TenantCreatedEvent } from '../types';
+import type { D1Logger } from '../../../shared/logger';
 
 /** KV TTL: 30 days in seconds */
 const KV_TTL_SECONDS = 2_592_000;
@@ -25,6 +26,8 @@ const VPC_TUNNEL_RETRY = { maxRetries: 2, delays: [2000, 4000] };
 const seedRoute = new Hono<{ Bindings: Env }>();
 
 seedRoute.post('/seed', gatewayAuth, async (c) => {
+  const logger = (c as any).get('logger') as D1Logger | undefined;
+
   // Parse JSON body
   let body: unknown;
   try {
@@ -62,6 +65,16 @@ seedRoute.post('/seed', gatewayAuth, async (c) => {
       error: error instanceof Error ? error.message : String(error),
     }));
     return c.json({ error: 'Service unavailable' }, 500);
+  }
+
+  // Emit audit log for tenant seed initiation
+  if (logger) {
+    logger.audit({
+      action: 'TENANT_SEED',
+      resource_type: 'tenant',
+      resource_id: event.tenant_id,
+      changes: { before: null, after: { tenant_id: event.tenant_id, tenant_code: event.tenant_code, event_id: event.event_id } },
+    });
   }
 
   // Return 202 Accepted immediately, process asynchronously

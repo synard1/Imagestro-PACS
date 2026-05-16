@@ -18,7 +18,7 @@
  * - Route: imagestro-pacs.pages.dev/wado-rs/*
  */
 
-const BACKEND_URL = 'https://dev-pacs-backend.satupintudigital.co.id';
+const BACKEND_URL = 'https://api-gateway-v2.xolution.workers.dev';
 const ACCESSION_WORKER_URL = 'https://accession-worker.satupintudigital.workers.dev';
 
 // Paths that should be proxied to backend
@@ -71,8 +71,14 @@ export default {
     }
 
     try {
+      // Strip /backend-api prefix if present
+      let targetPathname = url.pathname;
+      if (targetPathname.startsWith('/backend-api')) {
+        targetPathname = targetPathname.replace('/backend-api', '');
+      }
+
       // Build backend URL
-      const backendUrl = `${BACKEND_URL}${url.pathname}${url.search}`;
+      const backendUrl = `${BACKEND_URL}${targetPathname}${url.search}`;
 
       // Prepare headers to forward
       const headers = new Headers();

@@ -28,7 +28,8 @@ import {
   ArrowRightLeft,
   Upload,
   Heart,
-  Tag as TagIcon
+  Tag as TagIcon,
+  ScrollText,
 } from 'lucide-react';
 
 /**
@@ -112,6 +113,7 @@ export const NAVIGATION_CONFIG = [
     title: 'System',
     items: [
       { name: 'Reports', path: '/reports', icon: FileText, permission: 'report.view' },
+      { name: 'Log Viewer', path: '/admin/logs', icon: ScrollText, permission: 'logs.read' },
       { name: 'Audit Logs', path: '/audit-logs', icon: Shield, permission: 'audit.view' },
       { name: 'Auth Audit Logs', path: '/auth-audit-logs', icon: Shield, permission: 'audit.view' },
       { name: 'System Status', path: '/status', icon: Activity, permission: 'system.status' },

@@ -1,3 +1,12 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# DEPRECATED: This is the legacy proxy worker (imagestro-pacs-proxy).
+# It has been replaced by cloudflare/api-gateway-v2/ which uses Hono + TypeScript.
+#
+# To deploy the new gateway:
+#   cd cloudflare/api-gateway-v2 && wrangler deploy
+#
+# This file is kept temporarily for reference. Remove after full migration.
+# ─────────────────────────────────────────────────────────────────────────────
 name = "imagestro-pacs-proxy"
 main = "worker.js"
 compatibility_date = "2026-05-12"

@@ -2,6 +2,8 @@
  * Shared type definitions for api-gateway-v2.
  */
 
+import type { D1Logger } from '../../shared/logger';
+
 export type Bindings = {
   JWT_SECRET: string;
   JWT_ALGORITHM: string;
@@ -27,15 +29,28 @@ export type Bindings = {
   AUTH_WORKER: Fetcher;
   
   // Durable Objects
-  HEALTH_DO: DurableObjectNamespace<import("./objects/InfrastructureHealthDO").InfrastructureHealthDO>;
-  THUMBNAIL_DO: DurableObjectNamespace<import("./objects/ThumbnailGeneratorDO").ThumbnailGeneratorDO>;
+  HEALTH_DO: DurableObjectNamespace<import("./objects/InfrastructureHealthDO").InfrastructureHealthSQLite>;
+  THUMBNAIL_DO: DurableObjectNamespace<import("./objects/ThumbnailGeneratorDO").ThumbnailGeneratorSQLite>;
   
   // Rate Limiter
   HEALTH_RATE_LIMITER: { limit: (options: { key: string }) => Promise<{ success: boolean }> };
+  
+  // Centralized D1 Logging
+  LOG_DB: D1Database | null;
+  LOG_LEVEL: string;
+  LOG_SAMPLE_RATE: string;
+  LOG_BATCH_SIZE: string;
+  LOG_FLUSH_INTERVAL_MS: string;
+  LOG_DUAL_WRITE: string;
+  ALERT_WEBHOOK_URLS?: string;
 };
 
 export type AppContext = {
   Bindings: Bindings;
+  Variables: {
+    logger: D1Logger;
+    requestId?: string;
+  };
 };
 
 export interface AuthPayload {

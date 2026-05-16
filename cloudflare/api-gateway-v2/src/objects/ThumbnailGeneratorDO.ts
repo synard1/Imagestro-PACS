@@ -106,8 +106,18 @@ export class ThumbnailGeneratorSQLite extends DurableObject<Bindings> {
         // Map internal WADO-RS paths
         // Frontend sends: /api/studies/:studyId/series/:seriesId/instances/:instanceId/[thumbnail|rendered|original]
         // PACS expects: /wado-rs/studies/:studyId/series/:seriesId/instances/:instanceId/[thumbnail|rendered|original]
-        const wadoPath = path.replace('/api/', 'wado-rs/');
-        const pacsUrl = `${this.env.PACS_SERVICE_URL}/${wadoPath}${search}`;
+        let wadoPath = path;
+        if (wadoPath.startsWith('/backend-api')) {
+          wadoPath = wadoPath.replace('/backend-api', '');
+        }
+        if (wadoPath.startsWith('/api/')) {
+          wadoPath = wadoPath.replace('/api/', '/wado-rs/');
+        } else if (!wadoPath.startsWith('/')) {
+          wadoPath = '/' + wadoPath;
+        }
+        
+        const baseUrl = this.env.PACS_SERVICE_URL.replace(/\/$/, '');
+        const pacsUrl = `${baseUrl}${wadoPath}${search}`;
         
         console.log(`[ThumbnailDO] Proxying to PACS: ${pacsUrl}`);
         

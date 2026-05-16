@@ -50,12 +50,14 @@ import {
   AppError,
 } from '../errors';
 import { createShadowResponse } from '../middleware/shadow-mode';
+import type { D1Logger } from '../../../shared/logger';
 
 // ─── Hono Variable Types ─────────────────────────────────────────────────────
 
 type Variables = {
   tenant: TenantContext;
   shadowMode: boolean;
+  logger: D1Logger;
 };
 
 // ─── Router ──────────────────────────────────────────────────────────────────
@@ -254,7 +256,19 @@ accessionRoutes.post('/api/accessions', async (c) => {
     c.executionCtx.waitUntil(sendToMwlWriter(env, mwlPayload, requestId));
   }
 
-  // 13. Return 201 response
+  // 13. D1 audit emission — accession number generation (Req 4.5, 6.5)
+  const logger = c.get('logger') as D1Logger;
+  logger.audit({
+    action: 'ACCESSION_GENERATE',
+    resource_type: 'accession',
+    resource_id: id,
+    changes: {
+      before: null,
+      after: { accession_number: accessionNumber, source, modality: input.modality },
+    },
+  });
+
+  // 14. Return 201 response
   const responseBody = {
     id,
     accession_number: accessionNumber,

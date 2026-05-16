@@ -17,6 +17,12 @@ function createMockEnv(fetchImpl: typeof globalThis.fetch): Env {
     SEED_SERVICE_PASSWORD: 'seed-pass',
     JWT_SECRET: 'jwt-secret',
     AUTH_SERVICE_URL: 'http://auth-service:5000',
+    LOG_DB: null,
+    LOG_LEVEL: 'info',
+    LOG_SAMPLE_RATE: '1.0',
+    LOG_BATCH_SIZE: '50',
+    LOG_FLUSH_INTERVAL_MS: '5000',
+    LOG_DUAL_WRITE: 'true',
   };
 }
 

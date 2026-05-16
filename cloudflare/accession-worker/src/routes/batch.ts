@@ -35,8 +35,9 @@ import {
   IdempotencyConflictError,
 } from '../errors';
 import { createShadowResponse } from '../middleware/shadow-mode';
+import type { D1Logger } from '../../../shared/logger';
 
-type Variables = { tenant: TenantContext; shadowMode: boolean };
+type Variables = { tenant: TenantContext; shadowMode: boolean; logger: D1Logger };
 
 const batchRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -221,6 +222,20 @@ batchRoutes.post('/api/accessions/batch', async (c) => {
     : undefined;
 
   await createBatchAccessions(env.DB, records, idempotencyRecord);
+
+  // D1 audit emission — batch accession number generation (Req 4.5, 6.5)
+  const logger = c.get('logger') as D1Logger;
+  for (const result of accessionResults) {
+    logger.audit({
+      action: 'ACCESSION_GENERATE',
+      resource_type: 'accession',
+      resource_id: result.id,
+      changes: {
+        before: null,
+        after: { accession_number: result.accession_number, source: 'batch', modality: result.modality },
+      },
+    });
+  }
 
   // 8. Enqueue MWL calls
   if (env.ENABLE_MWL === 'true') {

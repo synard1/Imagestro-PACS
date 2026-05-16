@@ -91,6 +91,8 @@ const ImpersonateHistoryPage = lazy(() => import('./pages/ImpersonateHistoryPage
 const DevCacheManager = lazy(() => import('./components/DevCacheManager'))
 // Example page for advanced features demonstration
 const PatientsExample = lazy(() => import('./pages/PatientsExample'))
+// Centralized D1 Logging - Log Viewer
+const LogsViewerPage = lazy(() => import('./pages/admin/LogsViewerPage'))
 // Changelog
 const ChangelogLayout = lazy(() => import('./apps/ChangelogLayout'))
 const ChangelogViewer = lazy(() => import('./pages/ChangelogViewer'))
@@ -660,6 +662,12 @@ export default function App() {
               <Route path="/report/:studyId" element={
                 <ProtectedRoute permissions={['report.create', 'report.*']} any>
                   <ReportEditor />
+                </ProtectedRoute>
+              } />
+              {/* Centralized D1 Logging - Log Viewer */}
+              <Route path="/admin/logs" element={
+                <ProtectedRoute permissions={['logs.read', 'logs:read', '*']} any>
+                  <LogsViewerPage />
                 </ProtectedRoute>
               } />
               <Route path="*" element={<NotFound />} />

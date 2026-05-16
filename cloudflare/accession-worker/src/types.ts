@@ -28,6 +28,14 @@ export interface Env {
   RATE_LIMITER_WRITE: RateLimit; // 100/10s per tenant
   RATE_LIMITER_READ: RateLimit; // 500/10s per tenant
 
+  // Centralized D1 Logging
+  LOG_DB: D1Database | null;
+  LOG_LEVEL: string;
+  LOG_SAMPLE_RATE: string;
+  LOG_BATCH_SIZE: string;
+  LOG_FLUSH_INTERVAL_MS: string;
+  LOG_DUAL_WRITE: string;
+
   // Secrets (wrangler secret put)
   JWT_SECRET: string; // Required, HS256
   GATEWAY_SHARED_SECRET?: string; // For X-Gateway-Signature HMAC
@@ -40,7 +48,6 @@ export interface Env {
   CANARY_TENANT_IDS?: string; // comma-separated
   MIGRATION_AUDIT_LOG?: string; // "true" | "false"
   ALLOWED_ORIGINS?: string; // comma-separated origins
-  LOG_SAMPLE_RATE?: string; // "0.0" to "1.0"
   BUILD_VERSION?: string; // Git SHA injected at deploy
 }
 

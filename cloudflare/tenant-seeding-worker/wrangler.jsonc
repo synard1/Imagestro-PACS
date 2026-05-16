@@ -23,9 +23,26 @@
     }
   ],
 
+  // ─── D1 Database Bindings ─────────────────────────────────────────────
+  // Centralized D1 Logging — shared logs database bound as LOG_DB.
+  // Replace placeholder database_id with actual ID after provisioning.
+  "d1_databases": [
+    {
+      "binding": "LOG_DB",
+      "database_name": "imagestro-logs-db",
+      "database_id": "LOCAL_DEV_PLACEHOLDER"
+    }
+  ],
+
   // ─── Non-Sensitive Environment Variables ────────────────────────────
   "vars": {
-    "AUTH_SERVICE_URL": "http://auth-service:5000"
+    "AUTH_SERVICE_URL": "http://auth-service:5000",
+    // --- Centralized D1 Logging vars ---
+    "LOG_LEVEL": "info",
+    "LOG_SAMPLE_RATE": "0.1",
+    "LOG_BATCH_SIZE": "50",
+    "LOG_FLUSH_INTERVAL_MS": "5000",
+    "LOG_DUAL_WRITE": "true"
   },
 
   // ─── Observability ──────────────────────────────────────────────────
@@ -38,6 +55,46 @@
       "enabled": true,
       "head_sampling_rate": 1,
       "invocation_logs": true
+    }
+  },
+
+  // ─── Environment-Specific Overrides ─────────────────────────────────
+  // Each environment uses a distinct D1 database instance (Requirement 1.5).
+  // Replace placeholder database_id values with actual IDs after provisioning.
+  "env": {
+    "staging": {
+      "vars": {
+        "AUTH_SERVICE_URL": "http://auth-service:5000",
+        "LOG_LEVEL": "info",
+        "LOG_SAMPLE_RATE": "0.1",
+        "LOG_BATCH_SIZE": "50",
+        "LOG_FLUSH_INTERVAL_MS": "5000",
+        "LOG_DUAL_WRITE": "true"
+      },
+      "d1_databases": [
+        {
+          "binding": "LOG_DB",
+          "database_name": "imagestro-logs-db",
+          "database_id": "STAGING_DB_ID_PLACEHOLDER"
+        }
+      ]
+    },
+    "production": {
+      "vars": {
+        "AUTH_SERVICE_URL": "http://auth-service:5000",
+        "LOG_LEVEL": "warn",
+        "LOG_SAMPLE_RATE": "0.1",
+        "LOG_BATCH_SIZE": "50",
+        "LOG_FLUSH_INTERVAL_MS": "5000",
+        "LOG_DUAL_WRITE": "false"
+      },
+      "d1_databases": [
+        {
+          "binding": "LOG_DB",
+          "database_name": "imagestro-logs-db",
+          "database_id": "PRODUCTION_DB_ID_PLACEHOLDER"
+        }
+      ]
     }
   }
 }

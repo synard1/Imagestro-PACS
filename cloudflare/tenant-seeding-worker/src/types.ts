@@ -27,6 +27,20 @@ export interface Env {
 
   /** Base URL for the auth-service (e.g. "http://auth-service:5000") */
   AUTH_SERVICE_URL: string;
+
+  // --- Centralized D1 Logging bindings ---
+  /** D1 database for centralized logging (null when binding is absent) */
+  LOG_DB: D1Database | null;
+  /** Minimum log level: 'debug' | 'info' | 'warn' | 'error' */
+  LOG_LEVEL: string;
+  /** Sampling rate for debug/info logs [0.0, 1.0] */
+  LOG_SAMPLE_RATE: string;
+  /** Number of records to buffer before flushing */
+  LOG_BATCH_SIZE: string;
+  /** Max time (ms) between flushes */
+  LOG_FLUSH_INTERVAL_MS: string;
+  /** Whether to also emit logs to console/Analytics Engine */
+  LOG_DUAL_WRITE: string;
 }
 
 /** Event payload emitted by pacs-service after tenant creation */

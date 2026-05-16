@@ -1,12 +1,22 @@
 /**
- * KV-based rate limiting for login endpoints.
+ * KV-based rate limiting for login endpoints and general API routes.
  * Tracks attempts per-IP and per-username with configurable windows.
+ *
+ * Also exports a Hono middleware factory for applying rate limits to
+ * arbitrary route groups (e.g., Log Viewer API at /api/v2/logs/*).
  */
+
+import type { MiddlewareHandler } from 'hono';
 
 interface LoginRateLimitState {
   count: number;
   windowStart: number;
   blockedUntil: number;
+}
+
+interface RateLimitState {
+  count: number;
+  windowStart: number;
 }
 
 function toPositiveInt(value: string | undefined, fallback: number): number {
@@ -107,3 +117,114 @@ export async function applyLoginRateLimit(c: any): Promise<Response | null> {
   c.header('X-RateLimit-Remaining', String(ipResult.remaining));
   return null;
 }
+
+
+// ─── General-Purpose Rate Limiting Middleware ─────────────────────────────────
+
+export interface RateLimitOptions {
+  /** Maximum number of requests allowed within the window */
+  limit: number;
+  /** Window duration in seconds (default: 60) */
+  windowSeconds: number;
+  /** KV key prefix for namespacing (default: 'rl:api') */
+  prefix: string;
+  /**
+   * Function to extract the rate-limit key from the request context.
+   * Typically returns the user_id from auth headers.
+   * If it returns null/undefined, rate limiting is skipped.
+   */
+  keyExtractor: (c: any) => string | null | undefined;
+}
+
+/**
+ * Creates a Hono middleware that enforces a sliding-window rate limit
+ * using the API_CACHE KV namespace.
+ *
+ * Usage:
+ *   const logsRateLimit = createRateLimitMiddleware({
+ *     limit: 60,
+ *     windowSeconds: 60,
+ *     prefix: 'rl:logs',
+ *     keyExtractor: (c) => c.req.header('X-User-Id'),
+ *   });
+ *   logsRouter.use('*', logsRateLimit);
+ *
+ * Requirements: 12.8
+ */
+export function createRateLimitMiddleware(options: RateLimitOptions): MiddlewareHandler {
+  const { limit, windowSeconds, prefix, keyExtractor } = options;
+
+  return async (c, next) => {
+    const key = keyExtractor(c);
+
+    // If no key can be extracted (e.g., unauthenticated), skip rate limiting
+    if (!key) {
+      await next();
+      return;
+    }
+
+    const kvKey = `${prefix}:${key}`;
+    const now = Math.floor(Date.now() / 1000);
+
+    const kv = c.env.API_CACHE as KVNamespace | undefined;
+    if (!kv) {
+      // No KV binding available — skip rate limiting gracefully
+      await next();
+      return;
+    }
+
+    const raw = await kv.get(kvKey);
+    let state: RateLimitState = raw
+      ? JSON.parse(raw)
+      : { count: 0, windowStart: now };
+
+    // Reset window if expired
+    if (now - state.windowStart >= windowSeconds) {
+      state = { count: 0, windowStart: now };
+    }
+
+    state.count += 1;
+
+    // Set rate limit headers
+    const remaining = Math.max(0, limit - state.count);
+    c.header('X-RateLimit-Limit', String(limit));
+    c.header('X-RateLimit-Remaining', String(remaining));
+    c.header('X-RateLimit-Reset', String(state.windowStart + windowSeconds));
+
+    if (state.count > limit) {
+      const retryAfter = state.windowStart + windowSeconds - now;
+      await kv.put(kvKey, JSON.stringify(state), { expirationTtl: windowSeconds });
+
+      c.header('Retry-After', String(retryAfter));
+      return c.json(
+        {
+          success: false,
+          error: {
+            code: 'RATE_LIMITED',
+            message: 'Too many requests. Please try again later.',
+          },
+        },
+        429,
+      );
+    }
+
+    await kv.put(kvKey, JSON.stringify(state), { expirationTtl: windowSeconds });
+    await next();
+  };
+}
+
+// ─── Pre-configured Log Viewer Rate Limiter ───────────────────────────────────
+
+/**
+ * Rate limiter for the Log Viewer API routes (/api/v2/logs/*).
+ * Enforces 60 requests per minute keyed on the authenticated user_id
+ * (from the X-User-Id header injected by the auth middleware).
+ *
+ * Requirements: 12.8
+ */
+export const logsRateLimitMiddleware: MiddlewareHandler = createRateLimitMiddleware({
+  limit: 60,
+  windowSeconds: 60,
+  prefix: 'rl:logs',
+  keyExtractor: (c) => c.req.header('X-User-Id') ?? null,
+});

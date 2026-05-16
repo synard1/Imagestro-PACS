@@ -14,10 +14,13 @@ import { jwtAuth } from '../middleware/jwt-auth';
 import { AuthClient } from '../services/auth-client';
 import { generatePassword } from '../services/password-generator';
 import { DEFAULT_USERS, type Env } from '../types';
+import type { D1Logger } from '../../../shared/logger';
 
 const manualRoute = new Hono<{ Bindings: Env }>();
 
 manualRoute.post('/seed/manual', jwtAuth, async (c) => {
+  const logger = (c as any).get('logger') as D1Logger | undefined;
+
   // Parse and validate request body
   let body: { tenant_id?: string; email_domain?: string; roles?: string[] };
   try {
@@ -108,6 +111,19 @@ manualRoute.post('/seed/manual', jwtAuth, async (c) => {
         })
       );
     }
+  }
+
+  // Emit audit log for manual seed operation
+  if (logger) {
+    logger.audit({
+      action: 'TENANT_PROVISION',
+      resource_type: 'tenant',
+      resource_id: tenant_id,
+      changes: {
+        before: { existing_roles: Array.from(existingRoles) },
+        after: { users_created: usersCreated, roles_skipped: rolesToSkip, roles_requested: roles || null },
+      },
+    });
   }
 
   return c.json({

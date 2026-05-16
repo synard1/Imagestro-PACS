@@ -13,6 +13,22 @@ ORDER_SERVICE_URL = "http://order-management:8001"
 MWL_SERVICE_URL = "http://mwl-writer-secured:8000"
 SIMRS_UNIVERSAL_URL = "http://simrs-universal-api:8005"
 SATUSEHAT_INTEGRATOR_URL = "http://satusehat-integrator:8081"
+# --- Centralized D1 Logging vars ---
+LOG_LEVEL = "info"
+LOG_SAMPLE_RATE = "0.1"
+LOG_BATCH_SIZE = "50"
+LOG_FLUSH_INTERVAL_MS = "5000"
+LOG_DUAL_WRITE = "true"
+ALERT_WEBHOOK_URLS = ""
+# Optional: ALERT_EMAIL_BINDING is configured as a send_email binding (see [[send_email]] below).
+# When present, the D1Logger will dispatch email alerts for severity=critical error events.
+# To enable, add a [[send_email]] block with binding = "ALERT_EMAIL_BINDING" and configure
+# the destination_address. This is not required for the logging system to function.
+
+[[d1_databases]]
+binding = "LOG_DB"
+database_name = "imagestro-logs-db"
+database_id = "LOCAL_DEV_PLACEHOLDER"
 
 [[r2_buckets]]
 binding = "IMAGE_CACHE_R2"
@@ -56,3 +72,31 @@ simple = { limit = 20, period = 60 }
 [observability]
 enabled = true
 head_sampling_rate = 1
+
+# --- Environment-specific LOG_DB overrides ---
+# Each environment uses a distinct D1 database instance (Requirement 1.5).
+# Replace placeholder database_id values with actual IDs after provisioning.
+
+[env.staging.vars]
+LOG_LEVEL = "info"
+LOG_SAMPLE_RATE = "0.1"
+LOG_BATCH_SIZE = "50"
+LOG_FLUSH_INTERVAL_MS = "5000"
+LOG_DUAL_WRITE = "true"
+
+[[env.staging.d1_databases]]
+binding = "LOG_DB"
+database_name = "imagestro-logs-db"
+database_id = "STAGING_DB_ID_PLACEHOLDER"
+
+[env.production.vars]
+LOG_LEVEL = "warn"
+LOG_SAMPLE_RATE = "0.1"
+LOG_BATCH_SIZE = "50"
+LOG_FLUSH_INTERVAL_MS = "5000"
+LOG_DUAL_WRITE = "false"
+
+[[env.production.d1_databases]]
+binding = "LOG_DB"
+database_name = "imagestro-logs-db"
+database_id = "PRODUCTION_DB_ID_PLACEHOLDER"
