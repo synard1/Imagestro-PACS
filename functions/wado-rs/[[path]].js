@@ -1,5 +1,6 @@
 /**
  * Cloudflare Pages Function — Proxy /wado-rs/* to api-gateway-v2
+ * Forwards ALL headers for auth.
  */
 const GATEWAY_URL = 'https://api-gateway-v2.xolution.workers.dev';
 
@@ -23,13 +24,11 @@ export async function onRequest(context) {
   const gatewayUrl = `${GATEWAY_URL}${url.pathname}${url.search}`;
 
   const headers = new Headers();
-  const forwardHeaders = [
-    'authorization', 'content-type', 'cookie', 'accept',
-    'x-tenant-id', 'x-hospital-id', 'x-api-key', 'x-request-id'
-  ];
-  for (const h of forwardHeaders) {
-    const val = request.headers.get(h);
-    if (val) headers.set(h, val);
+  for (const [key, value] of request.headers.entries()) {
+    if (['host', 'cf-connecting-ip', 'cf-ray', 'cf-visitor', 'cf-ipcountry', 'cf-worker'].includes(key.toLowerCase())) {
+      continue;
+    }
+    headers.set(key, value);
   }
 
   headers.set('X-Forwarded-For', request.headers.get('cf-connecting-ip') || '');
