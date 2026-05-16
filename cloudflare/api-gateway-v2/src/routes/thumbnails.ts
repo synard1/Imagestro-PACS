@@ -27,12 +27,23 @@ function isCacheEnabled(env: any): boolean {
 /**
  * Direct proxy to PACS — no caching, no DO.
  * Converts /api/studies/... path to /wado-rs/studies/... for PACS.
+ * Also converts ?token= query param to Authorization header if needed.
  */
 async function proxyToPacs(c: any): Promise<Response> {
   const path = c.req.path;
   // Convert /api/studies/... → wado-rs/studies/...
   const wadoPath = path.replace(/^\/api\//, 'wado-rs/');
-  return proxyRequest(c, c.env.PACS_SERVICE_URL, wadoPath, {}, 'pacs');
+  
+  // If token is in query param but not in Authorization header, inject it
+  const tokenParam = c.req.query('token') || c.req.query('access_token');
+  const hasAuthHeader = !!c.req.header('Authorization');
+  
+  const extraHeaders: Record<string, string> = {};
+  if (tokenParam && !hasAuthHeader) {
+    extraHeaders['Authorization'] = `Bearer ${tokenParam}`;
+  }
+  
+  return proxyRequest(c, c.env.PACS_SERVICE_URL, wadoPath, extraHeaders, 'pacs');
 }
 
 /**

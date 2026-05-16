@@ -29,11 +29,12 @@ legacyRoutes.use('/api/*', async (c, next) => {
   // If it fails (different JWT secret), still forward — backend validates itself.
   const { tenant_id, role } = await getAuthContext(c);
   
-  // Only block if there's NO authorization header at all (truly unauthenticated)
+  // Only block if there's NO authorization at all (truly unauthenticated)
   const hasAuthHeader = !!c.req.header('Authorization');
   const hasCookie = !!c.req.header('Cookie');
+  const hasTokenParam = !!c.req.query('token') || !!c.req.query('access_token');
   
-  if (!tenant_id && !hasAuthHeader && !hasCookie) {
+  if (!tenant_id && !hasAuthHeader && !hasCookie && !hasTokenParam) {
     console.warn(`[ZeroTrust] No credentials at all for ${c.req.path}`);
     return c.json({ 
       success: false, 
