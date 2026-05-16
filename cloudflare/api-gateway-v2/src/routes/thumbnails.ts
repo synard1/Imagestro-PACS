@@ -1,32 +1,52 @@
 /**
- * Optimized Studies & Thumbnail Routes
- * Orchestrated via Cloudflare Durable Objects + R2 Cache
+ * Studies & Thumbnail Routes
  * 
- * These routes bypass the legacy Zero Trust middleware because:
- * 1. The DO handles auth forwarding to PACS directly
- * 2. Cached responses (R2 HIT) don't need auth validation
- * 3. The PACS service validates auth on its own for cache misses
+ * When THUMBNAIL_CACHE_ENABLED=true (default):
+ *   Uses Durable Objects + R2 for caching thumbnails.
+ * 
+ * When THUMBNAIL_CACHE_ENABLED=false:
+ *   Bypasses cache entirely — proxies directly to PACS via BACKBONE tunnel.
+ *   This is the "original" behavior before caching was introduced.
  */
 import { Hono } from 'hono';
 import type { AppContext } from '../types';
+import { proxyRequest } from '../services/proxy';
 
 export const thumbnailRoutes = new Hono<AppContext>();
 
 /**
+ * Check if thumbnail caching is enabled via env var.
+ */
+function isCacheEnabled(env: any): boolean {
+  const val = env.THUMBNAIL_CACHE_ENABLED;
+  // Default to false (disabled) until cache is proven stable
+  if (!val) return false;
+  return val === 'true' || val === '1';
+}
+
+/**
+ * Direct proxy to PACS — no caching, no DO.
+ * Converts /api/studies/... path to /wado-rs/studies/... for PACS.
+ */
+async function proxyToPacs(c: any): Promise<Response> {
+  const path = c.req.path;
+  // Convert /api/studies/... → wado-rs/studies/...
+  const wadoPath = path.replace(/^\/api\//, 'wado-rs/');
+  return proxyRequest(c, c.env.PACS_SERVICE_URL, wadoPath, {}, 'pacs');
+}
+
+/**
  * Build a request to forward to the Durable Object with all necessary headers.
- * Ensures auth, tenant, and request-id headers are propagated.
  */
 function buildDORequest(c: any): Request {
   const headers = new Headers(c.req.raw.headers);
   
-  // Ensure tenant headers are present (may come from JWT via gateway)
   const tenantId = c.req.header('x-tenant-id') || '';
   if (tenantId) {
     headers.set('X-Tenant-ID', tenantId);
     headers.set('X-Hospital-ID', tenantId);
   }
   
-  // Ensure request ID is propagated
   const requestId = c.req.header('x-request-id') || '';
   if (requestId) {
     headers.set('X-Request-ID', requestId);
@@ -38,11 +58,8 @@ function buildDORequest(c: any): Request {
   });
 }
 
-// Unified route for Thumbnail, Rendered (JPEG), and Original DICOM
-// Handles paths like: 
-//   /api/studies/:study/series/:series/instances/:instance/thumbnail
-//   /api/studies/:study/series/:series/instances/:instance/rendered
-//   /api/studies/:study/series/:series/instances/:instance/original (DICOM)
+// ─── Main route: /api/studies/:study/series/:series/instances/:instance/:type ──
+
 thumbnailRoutes.get('/api/studies/:studyId/series/:seriesId/instances/:instanceId/:type', async (c) => {
   const { type, instanceId } = c.req.param();
   
@@ -50,16 +67,18 @@ thumbnailRoutes.get('/api/studies/:studyId/series/:seriesId/instances/:instanceI
     return c.json({ error: 'Invalid resource type' }, 400);
   }
 
-  // Use the instance ID as the DO name so all requests for that instance 
-  // (thumb, rendered, original) are coordinated by the same DO.
+  // If cache disabled, proxy directly to PACS
+  if (!isCacheEnabled(c.env)) {
+    return proxyToPacs(c);
+  }
+
+  // Cache enabled — use Durable Object
   const doId = c.env.THUMBNAIL_DO.idFromName(instanceId);
   const stub = c.env.THUMBNAIL_DO.get(doId);
-  
-  // Forward to Durable Object with all headers
   return stub.fetch(buildDORequest(c));
 });
 
-// Also handle HEAD requests (used by service workers for cache validation)
+// HEAD requests
 thumbnailRoutes.on('HEAD', '/api/studies/:studyId/series/:seriesId/instances/:instanceId/:type', async (c) => {
   const { type, instanceId } = c.req.param();
   
@@ -67,22 +86,28 @@ thumbnailRoutes.on('HEAD', '/api/studies/:studyId/series/:seriesId/instances/:in
     return c.json({ error: 'Invalid resource type' }, 400);
   }
 
+  if (!isCacheEnabled(c.env)) {
+    return proxyToPacs(c);
+  }
+
   const doId = c.env.THUMBNAIL_DO.idFromName(instanceId);
   const stub = c.env.THUMBNAIL_DO.get(doId);
-  
   return stub.fetch(buildDORequest(c));
 });
 
-// Backward compatibility for old thumbnail route
+// Backward compatibility: /api/thumbnail/studies/...
 thumbnailRoutes.get('/api/thumbnail/studies/:studyId/series/:seriesId/instances/:instanceId', async (c) => {
   const { studyId, seriesId, instanceId } = c.req.param();
+
+  if (!isCacheEnabled(c.env)) {
+    return proxyToPacs(c);
+  }
+
   const doId = c.env.THUMBNAIL_DO.idFromName(instanceId);
   const stub = c.env.THUMBNAIL_DO.get(doId);
   
-  // Rewrite internal path for DO to handle it as 'thumbnail' type
   const url = new URL(c.req.url);
   url.pathname = `/api/studies/${studyId}/series/${seriesId}/instances/${instanceId}/thumbnail`;
-  
   const headers = new Headers(c.req.raw.headers);
   return stub.fetch(new Request(url.toString(), { method: 'GET', headers }));
 });

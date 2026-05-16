@@ -13,6 +13,10 @@ ORDER_SERVICE_URL = "http://order-management:8001"
 MWL_SERVICE_URL = "http://mwl-writer-secured:8000"
 SIMRS_UNIVERSAL_URL = "http://simrs-universal-api:8005"
 SATUSEHAT_INTEGRATOR_URL = "http://satusehat-integrator:8081"
+KHANZA_API_URL = "http://khanza-service:3007"
+KHANZA_INTERNAL_KEY = "PLACEHOLDER_KEY"
+# --- Feature Flags ---
+THUMBNAIL_CACHE_ENABLED = "false"  # Set to "true" to enable DO+R2 thumbnail caching
 # --- Centralized D1 Logging vars ---
 LOG_LEVEL = "info"
 LOG_SAMPLE_RATE = "0.1"
@@ -28,7 +32,7 @@ ALERT_WEBHOOK_URLS = ""
 [[d1_databases]]
 binding = "LOG_DB"
 database_name = "imagestro-logs-db"
-database_id = "LOCAL_DEV_PLACEHOLDER"
+database_id = "adf83b4c-0119-40d7-b267-2eeb71686687"
 
 [[r2_buckets]]
 binding = "IMAGE_CACHE_R2"

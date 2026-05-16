@@ -18,6 +18,9 @@ export type Bindings = {
   SATUSEHAT_INTEGRATOR_URL: string;
   ALLOWED_ORIGINS: string;
   
+  // Feature flags
+  THUMBNAIL_CACHE_ENABLED: string;
+  
   // Bindings
   API_CACHE: KVNamespace;
   IMAGE_CACHE_R2: R2Bucket;
