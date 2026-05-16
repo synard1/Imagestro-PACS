@@ -8,15 +8,26 @@ import { getConfigSync } from './config';
 import { isCached, getCachedImage, cacheImage } from './dicomImageCacheService';
 import { getAuthHeader } from './auth-storage';
 
+/**
+ * Sanitize apiBaseUrl — never use /backend-api in production.
+ * The /backend-api prefix is only for Vite dev proxy; in production
+ * the proxy worker handles routing from /api/* directly.
+ */
+function getSafePrefix() {
+  const { apiBaseUrl } = getConfigSync();
+  // Strip /backend-api — it causes double-prefix issues in production
+  if (apiBaseUrl === '/backend-api') return '';
+  return apiBaseUrl || '';
+}
+
 const getWadoBaseUrl = () => {
   const registry = loadRegistry();
   const studiesConfig = registry.studies || {};
-  const { apiBaseUrl } = getConfigSync();
 
   let baseUrl = studiesConfig.baseUrl;
 
   if (!baseUrl) {
-    const prefix = apiBaseUrl || "/backend-api";
+    const prefix = getSafePrefix() || "/backend-api";
     return `${prefix.replace(/\/$/, '')}/wado-rs`;
   }
 
@@ -34,14 +45,12 @@ const getHeaders = (extraHeaders = {}) => {
 
 export const wadoService = {
   getThumbnailUrl(studyId, seriesId, instanceId, size = 200) {
-    const { apiBaseUrl } = getConfigSync();
-    const prefix = apiBaseUrl || "";
+    const prefix = getSafePrefix();
     return `${prefix}/api/studies/${studyId}/series/${seriesId}/instances/${instanceId}/thumbnail?size=${size}`;
   },
 
   getRenderedUrl(studyId, seriesId, instanceId, windowCenter, windowWidth, quality = 90) {
-    const { apiBaseUrl } = getConfigSync();
-    const prefix = apiBaseUrl || "";
+    const prefix = getSafePrefix();
     let url = `${prefix}/api/studies/${studyId}/series/${seriesId}/instances/${instanceId}/rendered`;
     const params = new URLSearchParams();
 
@@ -54,8 +63,7 @@ export const wadoService = {
   },
 
   getInstanceUrl(studyId, seriesId, instanceId) {
-    const { apiBaseUrl } = getConfigSync();
-    const prefix = apiBaseUrl || "";
+    const prefix = getSafePrefix();
     return `${prefix}/api/studies/${studyId}/series/${seriesId}/instances/${instanceId}/original`;
   },
 

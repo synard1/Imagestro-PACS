@@ -22,7 +22,7 @@ const BACKEND_URL = 'https://api-gateway-v2.xolution.workers.dev';
 const ACCESSION_WORKER_URL = 'https://accession-worker.satupintudigital.workers.dev';
 
 // Paths that should be proxied to backend
-const PROXY_PATHS = ['/backend-api/', '/api/', '/wado-rs/', '/accession-api/'];
+const PROXY_PATHS = ['/backend-api/', '/backend-api', '/api/', '/wado-rs/', '/accession-api/'];
 
 // Headers to forward from client to backend
 const FORWARD_HEADERS = [
@@ -30,11 +30,14 @@ const FORWARD_HEADERS = [
   'content-type',
   'cookie',
   'x-csrf-token',
+  'x-tenant-id',
+  'x-hospital-id',
   'x-requested-with',
   'accept',
   'accept-language',
   'cache-control',
-  'user-agent'
+  'user-agent',
+  'x-request-id'
 ];
 
 // Headers to forward from backend to client
@@ -45,12 +48,15 @@ const RESPONSE_HEADERS = [
   'set-cookie',
   'x-csrf-token',
   'etag',
-  'last-modified'
+  'last-modified',
+  'x-cache-status',
+  'retry-after'
 ];
 
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    const backendUrlEnv = env.BACKEND_URL || BACKEND_URL;
 
     // Check if this request should be proxied
     const shouldProxy = PROXY_PATHS.some(path => url.pathname.startsWith(path));
@@ -73,12 +79,14 @@ export default {
     try {
       // Strip /backend-api prefix if present
       let targetPathname = url.pathname;
-      if (targetPathname.startsWith('/backend-api')) {
+      if (targetPathname.startsWith('/backend-api/')) {
         targetPathname = targetPathname.replace('/backend-api', '');
+      } else if (targetPathname === '/backend-api') {
+        targetPathname = '/';
       }
 
       // Build backend URL
-      const backendUrl = `${BACKEND_URL}${targetPathname}${url.search}`;
+      const backendUrl = `${backendUrlEnv.replace(/\/$/, '')}${targetPathname}${url.search}`;
 
       // Prepare headers to forward
       const headers = new Headers();
